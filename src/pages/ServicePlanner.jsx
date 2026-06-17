@@ -233,7 +233,10 @@ export default function ServicePlanner() {
     setServiceHymns(hymnsForEdit)
     const scripturesForEdit = svc.service_scriptures?.length ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order) : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }]
     setServiceScriptures(scripturesForEdit)
-    setEditingService(svc); setView('edit'); setSaveStatus(null)
+    // Auto-fill season/color if missing
+const autoSeason = (!svc.season && !svc.liturgical_color) ? getSeasonFromDate(svc.service_date) : { season: svc.season, color: svc.liturgical_color }
+setForm(f => ({ ...f, season: autoSeason.season || f.season, liturgical_color: autoSeason.color || f.liturgical_color }))
+setEditingService(svc); setView('edit'); setSaveStatus(null)
   }
 
   async function handleSave() {
