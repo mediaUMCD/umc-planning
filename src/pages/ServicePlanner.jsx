@@ -5,12 +5,16 @@ const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
 const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'NIV', 'NRSV', 'KJV', 'MSG', 'NLT', 'ESV']
 const SERVICE_TYPES = ['Regular Sunday', 'Communion Sunday', 'Advent', 'Christmas Eve', 'Ash Wednesday', 'Maundy Thursday', 'Good Friday', 'Easter', 'Pentecost', 'Rally Day', 'Lessons & Carols', 'Special Service']
+const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 895, 830])
 
 const SEASONS = [
-  { name: 'Advent', color: 'Purple' },
+  { name: '1st Sunday of Advent', color: 'Purple' },
+  { name: '2nd Sunday of Advent', color: 'Purple' },
+  { name: '3rd Sunday of Advent', color: 'Purple' },
+  { name: '4th Sunday of Advent', color: 'Purple' },
   { name: 'Christmas', color: 'White' },
-  { name: 'Epiphany', color: 'White' },
-  { name: '1st Sunday after Epiphany', color: 'Green' },
+  { name: 'Baptism of the Lord', color: 'White' },
+  { name: '1st Sunday after Epiphany', color: 'White' },
   { name: '2nd Sunday after Epiphany', color: 'Green' },
   { name: '3rd Sunday after Epiphany', color: 'Green' },
   { name: '4th Sunday after Epiphany', color: 'Green' },
@@ -39,12 +43,10 @@ const SEASONS = [
   { name: 'Pentecost', color: 'Red' },
   { name: 'Trinity Sunday', color: 'White' },
   { name: 'Season after Pentecost', color: 'Green' },
-  { name: 'Christ the King Sunday', color: 'White' },
-  { name: 'Season after Pentecost', color: 'Green' },
-  { name: 'Baptism of the Lord', color: 'White' },
   { name: 'Rally Day', color: 'Green' },
   { name: 'All Saints Day', color: 'White' },
   { name: 'Thanksgiving', color: 'Green' },
+  { name: 'Christ the King Sunday', color: 'White' },
 ]
 
 function getSeasonColor(season) {
@@ -63,19 +65,93 @@ function getSeasonStyle(color) {
   return map[color] || { bg: '#f0ede8', color: '#5c5850' }
 }
 
+function getSeasonFromDate(dateStr) {
+  if (!dateStr) return { season: '', color: '' }
+  const d = new Date(dateStr + 'T12:00:00')
+  const year = d.getFullYear()
+
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100
+    const d2 = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25)
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d2 - g + 15) % 30
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7
+    const m = Math.floor((a + 11 * h + 22 * l) / 451)
+    const month = Math.floor((h + l - 7 * m + 114) / 31)
+    const day = ((h + l - 7 * m + 114) % 31) + 1
+    return new Date(y, month - 1, day)
+  }
+
+  const e = easter(year)
+  const addDays = (dt, n) => new Date(dt.getTime() + n * 86400000)
+  const sameDay = (a, b) => a.toDateString() === b.toDateString()
+
+  const ashWed = addDays(e, -46)
+  const palmSunday = addDays(e, -7)
+  const maundyThursday = addDays(e, -3)
+  const goodFriday = addDays(e, -2)
+  const pentecost = addDays(e, 49)
+  const trinity = addDays(pentecost, 7)
+  const christmas = new Date(year, 11, 25)
+  const christmasDow = christmas.getDay()
+  const advent1 = addDays(christmas, -(christmasDow === 0 ? 28 : christmasDow + 21))
+
+  if (sameDay(d, goodFriday)) return { season: 'Good Friday', color: 'Purple' }
+  if (sameDay(d, maundyThursday)) return { season: 'Maundy Thursday', color: 'Purple' }
+  if (sameDay(d, palmSunday)) return { season: 'Palm/Passion Sunday', color: 'Green' }
+  if (sameDay(d, e)) return { season: 'Easter Sunday', color: 'White' }
+  if (sameDay(d, pentecost)) return { season: 'Pentecost', color: 'Red' }
+  if (sameDay(d, trinity)) return { season: 'Trinity Sunday', color: 'White' }
+  if (sameDay(d, ashWed)) return { season: 'Ash Wednesday', color: 'Grey' }
+
+  if (d >= advent1 && d < new Date(year, 11, 26)) {
+    const week = Math.floor((d - advent1) / 86400000 / 7) + 1
+    return { season: `${['1st','2nd','3rd','4th'][week-1]} Sunday of Advent`, color: 'Purple' }
+  }
+  if (d >= new Date(year, 11, 26) || d <= new Date(year, 0, 5)) return { season: 'Christmas', color: 'White' }
+
+  const epiphany = new Date(year, 0, 6)
+  const transfiguration = addDays(ashWed, -3)
+  if (d >= epiphany && d <= transfiguration) {
+    if (sameDay(d, transfiguration)) return { season: 'Transfiguration Sunday', color: 'White' }
+    const week = Math.floor((d - epiphany) / 86400000 / 7)
+    if (week === 0) return { season: 'Baptism of the Lord', color: 'White' }
+    return { season: `${['1st','2nd','3rd','4th','5th','6th','7th','8th'][week]} Sunday after Epiphany`, color: week === 0 ? 'White' : 'Green' }
+  }
+
+  if (d > ashWed && d < palmSunday) {
+    const week = Math.floor((d - ashWed) / 86400000 / 7) + 1
+    return { season: `${['1st','2nd','3rd','4th','5th'][week-1]} Sunday of Lent`, color: 'Purple' }
+  }
+
+  if (d > e && d < pentecost) {
+    const week = Math.floor((d - e) / 86400000 / 7)
+    return { season: `${['2nd','3rd','4th','5th','6th','7th'][week-1]} Sunday of Easter`, color: 'White' }
+  }
+
+  if (d > pentecost) {
+    const christKing = addDays(advent1, -7)
+    if (sameDay(d, christKing)) return { season: 'Christ the King Sunday', color: 'White' }
+    if (d.getMonth() === 8 && d.getDate() <= 7) return { season: 'Rally Day', color: 'Green' }
+    if (d.getMonth() === 10 && d.getDate() <= 7) return { season: 'All Saints Day', color: 'White' }
+    return { season: 'Season after Pentecost', color: 'Green' }
+  }
+
+  return { season: '', color: '' }
+}
+
 function buildBibleGatewayUrl(reference, version) {
-  const ref = encodeURIComponent(reference)
-  const ver = encodeURIComponent(version || 'CEB')
-  return `https://www.biblegateway.com/passage/?search=${ref}&version=${ver}`
+  return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${encodeURIComponent(version || 'CEB')}`
 }
 
 const sectionHead = {
-  fontSize: '14px',
-  fontWeight: 700,
-  color: 'var(--burgundy)',
-  marginBottom: '14px',
-  paddingBottom: '8px',
-  borderBottom: '1px solid var(--gray-100)',
+  fontSize: '14px', fontWeight: 700, color: 'var(--burgundy)',
+  marginBottom: '14px', paddingBottom: '8px', borderBottom: '1px solid var(--gray-100)',
+}
+
+const EMPTY_FORM = {
+  service_date: '', season: '', liturgical_color: '', service_type: 'Regular Sunday',
+  is_communion: false, sermon_series: '', spark_title: '', spark_preacher: 'Pastor Zach',
+  kids_story_teller: '', liturgist: '', notes: '',
 }
 
 export default function ServicePlanner() {
@@ -88,12 +164,7 @@ export default function ServicePlanner() {
   const [hymns, setHymns] = useState([])
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
-
-  const [form, setForm] = useState({
-    service_date: '', season: '', liturgical_color: '', service_type: 'Regular Sunday',
-    is_communion: false, sermon_series: '', spark_title: '', spark_preacher: 'Pastor Zach',
-    kids_story_teller: '', notes: '',
-  })
+  const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }])
   const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }])
 
@@ -117,9 +188,24 @@ export default function ServicePlanner() {
   }
 
   function handleHymnNumberChange(idx, number) {
-    const hymnal = parseInt(number) >= 1000 ? 'TFWS' : 'UMH'
+    const num = parseInt(number)
+    if (PAGE_REFS.has(num)) return
+    const hymnal = num >= 1000 ? 'TFWS' : 'UMH'
     const title = lookupHymnTitle(hymnal, number)
     setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number, hymnal, title } : h))
+  }
+
+  function handleDateChange(val) {
+    const { season, color } = getSeasonFromDate(val)
+    const isFirst = val ? new Date(val + 'T12:00:00').getDate() <= 7 : false
+    setForm(f => ({
+      ...f,
+      service_date: val,
+      season: season || f.season,
+      liturgical_color: color || f.liturgical_color,
+      is_communion: isFirst,
+      service_type: isFirst ? 'Communion Sunday' : 'Regular Sunday',
+    }))
   }
 
   function addHymn() { setServiceHymns(prev => [...prev, { hymnal: 'UMH', number: '', title: '', sort_order: prev.length + 1 }]) }
@@ -128,115 +214,42 @@ export default function ServicePlanner() {
   function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
 
-  function getSeasonFromDate(dateStr) {
-  if (!dateStr) return { season: '', color: '' }
-  const d = new Date(dateStr + 'T12:00:00')
-  const year = d.getFullYear()
-
-  function easter(y) {
-    const a = y % 19, b = Math.floor(y/100), c = y % 100
-    const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25)
-    const g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15) % 30
-    const i = Math.floor(c/4), k = c % 4, l = (32+2*e+2*i-h-k) % 7
-    const m = Math.floor((a+11*h+22*l)/451)
-    const month = Math.floor((h+l-7*m+114)/31)
-    const day = ((h+l-7*m+114) % 31) + 1
-    return new Date(y, month-1, day)
-  }
-
-  const e = easter(year)
-  const addDays = (dt, n) => new Date(dt.getTime() + n*86400000)
-  const sameDay = (a, b) => a.toDateString() === b.toDateString()
-
-  const ashWed = addDays(e, -46)
-  const palmSunday = addDays(e, -7)
-  const maundyThursday = addDays(e, -3)
-  const goodFriday = addDays(e, -2)
-  const pentecost = addDays(e, 49)
-  const trinity = addDays(pentecost, 7)
-
-  // Advent: 4th Sunday before Christmas
-  const christmas = new Date(year, 11, 25)
-  const christmasDow = christmas.getDay()
-  const advent1 = addDays(christmas, -(christmasDow === 0 ? 28 : (christmasDow + 21)))
-
-  if (sameDay(d, goodFriday)) return { season: 'Good Friday', color: 'Purple' }
-  if (sameDay(d, maundyThursday)) return { season: 'Maundy Thursday', color: 'Purple' }
-  if (sameDay(d, palmSunday)) return { season: 'Palm/Passion Sunday', color: 'Green' }
-  if (sameDay(d, e)) return { season: 'Easter Sunday', color: 'White' }
-  if (sameDay(d, pentecost)) return { season: 'Pentecost', color: 'Red' }
-  if (sameDay(d, trinity)) return { season: 'Trinity Sunday', color: 'White' }
-  if (sameDay(d, ashWed)) return { season: 'Ash Wednesday', color: 'Grey' }
-
-  // Advent
-  if (d >= advent1 && d < new Date(year, 11, 26)) {
-    const week = Math.floor((d - advent1) / 86400000 / 7) + 1
-    const names = ['1st', '2nd', '3rd', '4th']
-    return { season: `${names[week-1]} Sunday of Advent`, color: 'Purple' }
-  }
-
-  // Christmas
-  if (d >= new Date(year, 11, 26) || d <= new Date(year, 0, 5)) return { season: 'Christmas', color: 'White' }
-
-  // Epiphany
-  const epiphany = new Date(year, 0, 6)
-  const transfiguration = addDays(ashWed, -3) // Sunday before Ash Wed
-  if (d >= epiphany && d <= transfiguration) {
-    if (sameDay(d, transfiguration)) return { season: 'Transfiguration Sunday', color: 'White' }
-    const week = Math.floor((d - epiphany) / 86400000 / 7)
-    if (week === 0) return { season: 'Baptism of the Lord', color: 'White' }
-    const names = ['1st','2nd','3rd','4th','5th','6th','7th','8th']
-    return { season: `${names[week]} Sunday after Epiphany`, color: week === 0 ? 'White' : 'Green' }
-  }
-
-  // Lent
-  if (d > ashWed && d < palmSunday) {
-    const week = Math.floor((d - ashWed) / 86400000 / 7) + 1
-    const names = ['1st','2nd','3rd','4th','5th']
-    return { season: `${names[week-1]} Sunday of Lent`, color: 'Purple' }
-  }
-
-  // Easter season
-  if (d > e && d < pentecost) {
-    const week = Math.floor((d - e) / 86400000 / 7)
-    const names = ['2nd','3rd','4th','5th','6th','7th']
-    return { season: `${names[week-1]} Sunday of Easter`, color: 'White' }
-  }
-
-  // Season after Pentecost
-  if (d > pentecost) {
-    const christKing = addDays(advent1, -7)
-    if (sameDay(d, christKing)) return { season: 'Christ the King Sunday', color: 'White' }
-    if (d.getMonth() === 8 && d.getDate() <= 7) return { season: 'Rally Day', color: 'Green' }
-    if (d.getMonth() === 10 && d.getDate() <= 7) return { season: 'All Saints Day', color: 'White' }
-    return { season: 'Season after Pentecost', color: 'Green' }
-  }
-
-  return { season: '', color: '' }
-}
-
-  function handleSeasonChange(season) {
-    const color = getSeasonColor(season)
-    setForm(f => ({ ...f, season, liturgical_color: color }))
-  }
-
   function startNew() {
-    setForm({ service_date: '', season: '', liturgical_color: '', service_type: 'Regular Sunday', is_communion: false, sermon_series: '', spark_title: '', spark_preacher: 'Pastor Zach', kids_story_teller: '', notes: '' })
+    setForm(EMPTY_FORM)
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }])
     setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }])
     setEditingService(null); setView('edit'); setSaveStatus(null)
   }
 
   function startEdit(svc) {
-    setForm({ service_date: svc.service_date, season: svc.season || '', liturgical_color: svc.liturgical_color || '', service_type: svc.service_type || 'Regular Sunday', is_communion: svc.is_communion || false, sermon_series: svc.sermon_series || '', spark_title: svc.spark_title || '', spark_preacher: svc.spark_preacher || 'Pastor Zach', kids_story_teller: svc.kids_story_teller || '', notes: svc.notes || '' })
-    const hymnsForEdit = svc.service_hymns?.length ? svc.service_hymns.sort((a, b) => a.sort_order - b.sort_order).map(h => ({ hymnal: h.hymnal, number: String(h.number), title: lookupHymnTitle(h.hymnal, h.number), sort_order: h.sort_order, id: h.id })) : [{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }]
-    setServiceHymns(hymnsForEdit)
-    const scripturesForEdit = svc.service_scriptures?.length ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order) : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }]
-    setServiceScriptures(scripturesForEdit)
-    // Auto-fill season/color if missing
-const autoSeason = (!svc.season && !svc.liturgical_color) ? getSeasonFromDate(svc.service_date) : { season: svc.season, color: svc.liturgical_color }
-setForm(f => ({ ...f, season: autoSeason.season || f.season, liturgical_color: autoSeason.color || f.liturgical_color }))
-setEditingService(svc); setView('edit'); setSaveStatus(null)
+    const auto = (!svc.season && !svc.liturgical_color) ? getSeasonFromDate(svc.service_date) : {}
+    setForm({
+      service_date: svc.service_date,
+      season: svc.season || auto.season || '',
+      liturgical_color: svc.liturgical_color || auto.color || '',
+      service_type: svc.service_type || 'Regular Sunday',
+      is_communion: svc.is_communion || false,
+      sermon_series: svc.sermon_series || '',
+      spark_title: svc.spark_title || '',
+      spark_preacher: svc.spark_preacher || 'Pastor Zach',
+      kids_story_teller: svc.kids_story_teller || '',
+      liturgist: svc.liturgist || '',
+      notes: svc.notes || '',
+    })
+    setServiceHymns(
+      svc.service_hymns?.length
+        ? svc.service_hymns.sort((a, b) => a.sort_order - b.sort_order).map(h => ({
+            hymnal: h.hymnal, number: String(h.number),
+            title: lookupHymnTitle(h.hymnal, h.number), sort_order: h.sort_order,
+          }))
+        : [{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }]
+    )
+    setServiceScriptures(
+      svc.service_scriptures?.length
+        ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order)
+        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }]
+    )
+    setEditingService(svc); setView('edit'); setSaveStatus(null)
   }
 
   async function handleSave() {
@@ -254,13 +267,23 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
         const { data, error } = await supabase.from('service_dates').insert([{ ...form }]).select().single()
         if (error) throw error
         serviceId = data.id
-        const uploadTypes = ['service', 'children', 'spark', 'music', 'special', 'podcast_spark', 'podcast_music']
-        await supabase.from('upload_tracker').insert(uploadTypes.map(t => ({ service_date_id: serviceId, upload_type: t, is_uploaded: false, podcast_published: false })))
+        await supabase.from('upload_tracker').insert(
+          ['service','children','spark','music','special','podcast_spark','podcast_music']
+            .map(t => ({ service_date_id: serviceId, upload_type: t, is_uploaded: false, podcast_published: false }))
+        )
       }
-      const validHymns = serviceHymns.filter(h => h.number)
-      if (validHymns.length > 0) await supabase.from('service_hymns').insert(validHymns.map(h => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: h.sort_order })))
+      const validHymns = serviceHymns.filter(h => h.number && !PAGE_REFS.has(parseInt(h.number)))
+      if (validHymns.length > 0) {
+        await supabase.from('service_hymns').insert(
+          validHymns.map(h => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: h.sort_order }))
+        )
+      }
       const validScriptures = serviceScriptures.filter(s => s.reference)
-      if (validScriptures.length > 0) await supabase.from('service_scriptures').insert(validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order })))
+      if (validScriptures.length > 0) {
+        await supabase.from('service_scriptures').insert(
+          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order }))
+        )
+      }
       setSaveStatus('success'); loadServices()
       setTimeout(() => setView('list'), 800)
     } catch (err) { console.error(err); setSaveStatus('error') }
@@ -282,7 +305,9 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
     return true
   })
 
+  // ── EDIT VIEW ──
   if (view === 'edit') {
+    const seasonStyle = getSeasonStyle(form.liturgical_color)
     return (
       <div>
         <div className="page-header">
@@ -296,26 +321,27 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
         </div>
         {saveStatus === 'success' && <div className="alert alert-success" style={{ margin: '12px 28px 0' }}>✓ Saved!</div>}
         {saveStatus === 'error' && <div className="alert alert-error" style={{ margin: '12px 28px 0' }}>Something went wrong.</div>}
+
         <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
+
+          {/* LEFT COLUMN */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+            {/* Date & Season */}
             <div className="card">
               <h2 style={sectionHead}>📅 Date & Season</h2>
               {form.liturgical_color && (
-                <div style={{ ...getSeasonStyle(form.liturgical_color), padding: '8px 12px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 600 }}>
+                <div style={{ background: seasonStyle.bg, color: seasonStyle.color, padding: '8px 12px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 600 }}>
                   🎨 Altar color: <strong>{form.liturgical_color}</strong>
                 </div>
               )}
               <div className="form-group">
                 <label className="form-label">Service Date *</label>
-                <input type="date" value={form.service_date} onChange={e => {
-  const val = e.target.value
-  const { season, color } = getSeasonFromDate(val)
-  setForm(f => ({ ...f, service_date: val, season: season || f.season, liturgical_color: color || f.liturgical_color }))
-}} />
+                <input type="date" value={form.service_date} onChange={e => handleDateChange(e.target.value)} />
               </div>
               <div className="form-group">
                 <label className="form-label">Season</label>
-                <select value={form.season} onChange={e => handleSeasonChange(e.target.value)}>
+                <select value={form.season} onChange={e => setForm(f => ({ ...f, season: e.target.value, liturgical_color: getSeasonColor(e.target.value) || f.liturgical_color }))}>
                   <option value="">Select season…</option>
                   {SEASONS.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                 </select>
@@ -338,6 +364,8 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
                 🥖 Communion Sunday
               </label>
             </div>
+
+            {/* Sunday Spark */}
             <div className="card">
               <h2 style={sectionHead}>✨ Sunday Spark</h2>
               <div className="form-group">
@@ -355,8 +383,10 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
                 </select>
               </div>
             </div>
+
+            {/* Kids Story & Liturgist */}
             <div className="card">
-              <h2 style={sectionHead}>👦 Kids Story</h2>
+              <h2 style={sectionHead}>👦 Kids Story & Liturgist</h2>
               <div className="form-group">
                 <label className="form-label">Story Teller</label>
                 <select value={form.kids_story_teller} onChange={e => setForm(f => ({ ...f, kids_story_teller: e.target.value }))}>
@@ -364,13 +394,23 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
                   {STORYTELLERS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+              <div className="form-group">
+                <label className="form-label">Liturgist</label>
+                <input type="text" value={form.liturgist} onChange={e => setForm(f => ({ ...f, liturgist: e.target.value }))} placeholder="e.g. Cyndi Perkins" />
+              </div>
             </div>
+
+            {/* Notes */}
             <div className="card">
               <h2 style={sectionHead}>📝 Notes</h2>
               <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any additional notes…" />
             </div>
           </div>
+
+          {/* RIGHT COLUMN */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+            {/* Hymns */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h2 style={{ ...sectionHead, margin: 0 }}>🎵 Hymns</h2>
@@ -402,6 +442,8 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
                 </div>
               ))}
             </div>
+
+            {/* Scriptures */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h2 style={{ ...sectionHead, margin: 0 }}>📖 Scripture Readings</h2>
@@ -441,6 +483,7 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
     )
   }
 
+  // ── LIST VIEW ──
   return (
     <div>
       <div className="page-header">
@@ -450,7 +493,8 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
       <div className="page-body">
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
           {['upcoming', 'past', 'all'].map(f => (
-            <button key={f} onClick={() => { setFilter(f); setSearchDate('') }} className="btn" style={{ background: filter === f && !searchDate ? 'var(--burgundy)' : 'var(--gray-100)', color: filter === f && !searchDate ? 'white' : 'var(--gray-800)' }}>
+            <button key={f} onClick={() => { setFilter(f); setSearchDate('') }} className="btn"
+              style={{ background: filter === f && !searchDate ? 'var(--burgundy)' : 'var(--gray-100)', color: filter === f && !searchDate ? 'white' : 'var(--gray-800)' }}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
@@ -460,36 +504,36 @@ setEditingService(svc); setView('edit'); setSaveStatus(null)
             {searchDate && <button className="btn btn-secondary btn-sm" onClick={() => setSearchDate('')}>Clear</button>}
           </div>
         </div>
-        {loading ? <div className="spinner" /> : (
-          filteredServices.length === 0 ? (
-            <div className="empty-state"><div className="icon">📅</div><p>No services found.</p></div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredServices.map(svc => {
-                const style = getSeasonStyle(svc.liturgical_color)
-                const isPast = svc.service_date < today
-                return (
-                  <div key={svc.id} style={{ background: 'white', border: '1px solid var(--gray-100)', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '16px', opacity: isPast ? 0.75 : 1 }}>
-                    <div style={{ width: '6px', height: '48px', borderRadius: '3px', background: style.color, flexShrink: 0 }} />
-                    <div style={{ minWidth: '180px' }}>
-                      <div style={{ fontWeight: 700, fontSize: '14px' }}>{formatDate(svc.service_date)}</div>
-                      {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
-                      {svc.service_type && <span style={{ fontSize: '11px', background: 'var(--gray-100)', color: 'var(--gray-600)', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>{svc.service_type}</span>}
-                      {svc.is_communion && <span style={{ fontSize: '11px', background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>🥖 Communion</span>}
-                      {svc.spark_title && <span style={{ fontSize: '12px', color: 'var(--gray-800)' }}>"{svc.spark_title}"</span>}
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--gray-400)', minWidth: '60px', textAlign: 'center' }}>🎵 {svc.service_hymns?.length || 0}</div>
-                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
-                    </div>
+
+        {loading ? <div className="spinner" /> : filteredServices.length === 0 ? (
+          <div className="empty-state"><div className="icon">📅</div><p>No services found.</p></div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {filteredServices.map(svc => {
+              const style = getSeasonStyle(svc.liturgical_color)
+              const isPast = svc.service_date < today
+              return (
+                <div key={svc.id} style={{ background: 'white', border: '1px solid var(--gray-100)', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '16px', opacity: isPast ? 0.75 : 1 }}>
+                  <div style={{ width: '6px', height: '48px', borderRadius: '3px', background: style.color, flexShrink: 0 }} />
+                  <div style={{ minWidth: '180px' }}>
+                    <div style={{ fontWeight: 700, fontSize: '14px' }}>{formatDate(svc.service_date)}</div>
+                    {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
                   </div>
-                )
-              })}
-            </div>
-          )
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
+                    {svc.service_type && <span style={{ fontSize: '11px', background: 'var(--gray-100)', color: 'var(--gray-600)', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>{svc.service_type}</span>}
+                    {svc.is_communion && <span style={{ fontSize: '11px', background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>🥖 Communion</span>}
+                    {svc.spark_title && <span style={{ fontSize: '12px', color: 'var(--gray-800)' }}>"{svc.spark_title}"</span>}
+                    {svc.liturgist && <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Liturgist: {svc.liturgist}</span>}
+                  </div>
+                  <div style={{ fontSize: '13px', color: 'var(--gray-400)', minWidth: '60px', textAlign: 'center' }}>🎵 {svc.service_hymns?.length || 0}</div>
+                  <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc)}>Edit</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
     </div>
