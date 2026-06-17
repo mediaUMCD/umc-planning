@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { id: 'planner', icon: '📅', label: 'Service Planner' },
   { id: 'hymns', icon: '🎵', label: 'Hymn Tracker' },
   { id: 'uploads', icon: '📤', label: 'Upload Tracker' },
+  { id: 'import', icon: '📥', label: 'Bulletin Import' },
 ]
 
 export default function Sidebar({ page, navigate, session }) {

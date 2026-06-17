@@ -6,6 +6,8 @@ import ServicePlanner from './pages/ServicePlanner.jsx'
 import HymnTracker from './pages/HymnTracker.jsx'
 import UploadTracker from './pages/UploadTracker.jsx'
 import Sidebar from './components/Sidebar.jsx'
+import BulletinImport from './pages/BulletinImport.jsx'
+
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -34,14 +36,15 @@ export default function App() {
   if (!session) return <Login />
 
   const renderPage = () => {
-    switch (page) {
-      case 'dashboard': return <Dashboard navigate={setPage} />
-      case 'planner': return <ServicePlanner />
-      case 'hymns': return <HymnTracker />
-      case 'uploads': return <UploadTracker />
-      default: return <Dashboard navigate={setPage} />
-    }
+  switch (page) {
+    case 'dashboard': return <Dashboard navigate={setPage} />
+    case 'planner': return <ServicePlanner />
+    case 'hymns': return <HymnTracker />
+    case 'uploads': return <UploadTracker />
+    case 'import': return <BulletinImport />
+    default: return <Dashboard navigate={setPage} />
   }
+}
 
   return (
     <div className="app-layout">

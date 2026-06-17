@@ -10,7 +10,7 @@ const SEASONS = [
   { name: 'Advent', color: 'Purple' },
   { name: 'Christmas', color: 'White' },
   { name: 'Epiphany', color: 'White' },
-  { name: '1st Sunday after Epiphany', color: 'White' },
+  { name: '1st Sunday after Epiphany', color: 'Green' },
   { name: '2nd Sunday after Epiphany', color: 'Green' },
   { name: '3rd Sunday after Epiphany', color: 'Green' },
   { name: '4th Sunday after Epiphany', color: 'Green' },
@@ -40,6 +40,7 @@ const SEASONS = [
   { name: 'Trinity Sunday', color: 'White' },
   { name: 'Season after Pentecost', color: 'Green' },
   { name: 'Christ the King Sunday', color: 'White' },
+  { name: 'Season after Pentecost', color: 'Green' },
   { name: 'Baptism of the Lord', color: 'White' },
   { name: 'Rally Day', color: 'Green' },
   { name: 'All Saints Day', color: 'White' },
@@ -126,6 +127,93 @@ export default function ServicePlanner() {
   function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1 }]) }
   function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
+
+  function getSeasonFromDate(dateStr) {
+  if (!dateStr) return { season: '', color: '' }
+  const d = new Date(dateStr + 'T12:00:00')
+  const year = d.getFullYear()
+
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y/100), c = y % 100
+    const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25)
+    const g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15) % 30
+    const i = Math.floor(c/4), k = c % 4, l = (32+2*e+2*i-h-k) % 7
+    const m = Math.floor((a+11*h+22*l)/451)
+    const month = Math.floor((h+l-7*m+114)/31)
+    const day = ((h+l-7*m+114) % 31) + 1
+    return new Date(y, month-1, day)
+  }
+
+  const e = easter(year)
+  const addDays = (dt, n) => new Date(dt.getTime() + n*86400000)
+  const sameDay = (a, b) => a.toDateString() === b.toDateString()
+
+  const ashWed = addDays(e, -46)
+  const palmSunday = addDays(e, -7)
+  const maundyThursday = addDays(e, -3)
+  const goodFriday = addDays(e, -2)
+  const pentecost = addDays(e, 49)
+  const trinity = addDays(pentecost, 7)
+
+  // Advent: 4th Sunday before Christmas
+  const christmas = new Date(year, 11, 25)
+  const christmasDow = christmas.getDay()
+  const advent1 = addDays(christmas, -(christmasDow === 0 ? 28 : (christmasDow + 21)))
+
+  if (sameDay(d, goodFriday)) return { season: 'Good Friday', color: 'Purple' }
+  if (sameDay(d, maundyThursday)) return { season: 'Maundy Thursday', color: 'Purple' }
+  if (sameDay(d, palmSunday)) return { season: 'Palm/Passion Sunday', color: 'Green' }
+  if (sameDay(d, e)) return { season: 'Easter Sunday', color: 'White' }
+  if (sameDay(d, pentecost)) return { season: 'Pentecost', color: 'Red' }
+  if (sameDay(d, trinity)) return { season: 'Trinity Sunday', color: 'White' }
+  if (sameDay(d, ashWed)) return { season: 'Ash Wednesday', color: 'Grey' }
+
+  // Advent
+  if (d >= advent1 && d < new Date(year, 11, 26)) {
+    const week = Math.floor((d - advent1) / 86400000 / 7) + 1
+    const names = ['1st', '2nd', '3rd', '4th']
+    return { season: `${names[week-1]} Sunday of Advent`, color: 'Purple' }
+  }
+
+  // Christmas
+  if (d >= new Date(year, 11, 26) || d <= new Date(year, 0, 5)) return { season: 'Christmas', color: 'White' }
+
+  // Epiphany
+  const epiphany = new Date(year, 0, 6)
+  const transfiguration = addDays(ashWed, -3) // Sunday before Ash Wed
+  if (d >= epiphany && d <= transfiguration) {
+    if (sameDay(d, transfiguration)) return { season: 'Transfiguration Sunday', color: 'White' }
+    const week = Math.floor((d - epiphany) / 86400000 / 7)
+    if (week === 0) return { season: 'Baptism of the Lord', color: 'White' }
+    const names = ['1st','2nd','3rd','4th','5th','6th','7th','8th']
+    return { season: `${names[week]} Sunday after Epiphany`, color: week === 0 ? 'White' : 'Green' }
+  }
+
+  // Lent
+  if (d > ashWed && d < palmSunday) {
+    const week = Math.floor((d - ashWed) / 86400000 / 7) + 1
+    const names = ['1st','2nd','3rd','4th','5th']
+    return { season: `${names[week-1]} Sunday of Lent`, color: 'Purple' }
+  }
+
+  // Easter season
+  if (d > e && d < pentecost) {
+    const week = Math.floor((d - e) / 86400000 / 7)
+    const names = ['2nd','3rd','4th','5th','6th','7th']
+    return { season: `${names[week-1]} Sunday of Easter`, color: 'White' }
+  }
+
+  // Season after Pentecost
+  if (d > pentecost) {
+    const christKing = addDays(advent1, -7)
+    if (sameDay(d, christKing)) return { season: 'Christ the King Sunday', color: 'White' }
+    if (d.getMonth() === 8 && d.getDate() <= 7) return { season: 'Rally Day', color: 'Green' }
+    if (d.getMonth() === 10 && d.getDate() <= 7) return { season: 'All Saints Day', color: 'White' }
+    return { season: 'Season after Pentecost', color: 'Green' }
+  }
+
+  return { season: '', color: '' }
+}
 
   function handleSeasonChange(season) {
     const color = getSeasonColor(season)
@@ -216,7 +304,11 @@ export default function ServicePlanner() {
               )}
               <div className="form-group">
                 <label className="form-label">Service Date *</label>
-                <input type="date" value={form.service_date} onChange={e => setForm(f => ({ ...f, service_date: e.target.value }))} />
+                <input type="date" value={form.service_date} onChange={e => {
+  const val = e.target.value
+  const { season, color } = getSeasonFromDate(val)
+  setForm(f => ({ ...f, service_date: val, season: season || f.season, liturgical_color: color || f.liturgical_color }))
+}} />
               </div>
               <div className="form-group">
                 <label className="form-label">Season</label>
