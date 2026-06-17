@@ -5,7 +5,7 @@ const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
 const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'NIV', 'NRSV', 'KJV', 'MSG', 'NLT', 'ESV']
 const SERVICE_TYPES = ['Regular Sunday', 'Communion Sunday', 'Advent', 'Christmas Eve', 'Ash Wednesday', 'Maundy Thursday', 'Good Friday', 'Easter', 'Pentecost', 'Rally Day', 'Lessons & Carols', 'Special Service']
-const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 895, 830])
+const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900])
 
 const SEASONS = [
   { name: '1st Sunday of Advent', color: 'Purple' },
@@ -154,7 +154,7 @@ const EMPTY_FORM = {
   kids_story_teller: '', liturgist: '', notes: '',
 }
 
-export default function ServicePlanner() {
+export default function ServicePlanner({ onViewService }) {
   const [view, setView] = useState('list')
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -323,11 +323,7 @@ export default function ServicePlanner() {
         {saveStatus === 'error' && <div className="alert alert-error" style={{ margin: '12px 28px 0' }}>Something went wrong.</div>}
 
         <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
-
-          {/* LEFT COLUMN */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
-            {/* Date & Season */}
             <div className="card">
               <h2 style={sectionHead}>📅 Date & Season</h2>
               {form.liturgical_color && (
@@ -365,7 +361,6 @@ export default function ServicePlanner() {
               </label>
             </div>
 
-            {/* Sunday Spark */}
             <div className="card">
               <h2 style={sectionHead}>✨ Sunday Spark</h2>
               <div className="form-group">
@@ -384,9 +379,8 @@ export default function ServicePlanner() {
               </div>
             </div>
 
-            {/* Kids Story & Liturgist */}
             <div className="card">
-              <h2 style={sectionHead}>👦 Kids Story & Liturgist</h2>
+              <h2 style={sectionHead}>👥 Kids Story & Liturgist</h2>
               <div className="form-group">
                 <label className="form-label">Story Teller</label>
                 <select value={form.kids_story_teller} onChange={e => setForm(f => ({ ...f, kids_story_teller: e.target.value }))}>
@@ -400,17 +394,13 @@ export default function ServicePlanner() {
               </div>
             </div>
 
-            {/* Notes */}
             <div className="card">
               <h2 style={sectionHead}>📝 Notes</h2>
               <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any additional notes…" />
             </div>
           </div>
 
-          {/* RIGHT COLUMN */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
-            {/* Hymns */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h2 style={{ ...sectionHead, margin: 0 }}>🎵 Hymns</h2>
@@ -443,7 +433,6 @@ export default function ServicePlanner() {
               ))}
             </div>
 
-            {/* Scriptures */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h2 style={{ ...sectionHead, margin: 0 }}>📖 Scripture Readings</h2>
@@ -513,20 +502,38 @@ export default function ServicePlanner() {
               const style = getSeasonStyle(svc.liturgical_color)
               const isPast = svc.service_date < today
               return (
-                <div key={svc.id} style={{ background: 'white', border: '1px solid var(--gray-100)', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '16px', opacity: isPast ? 0.75 : 1 }}>
+                <div
+                  key={svc.id}
+                  style={{ background: 'white', border: '1px solid var(--gray-100)', borderRadius: '10px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '16px', opacity: isPast ? 0.8 : 1, transition: 'box-shadow 0.15s' }}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(61,0,38,0.1)'}
+                  onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                >
                   <div style={{ width: '6px', height: '48px', borderRadius: '3px', background: style.color, flexShrink: 0 }} />
-                  <div style={{ minWidth: '180px' }}>
-                    <div style={{ fontWeight: 700, fontSize: '14px' }}>{formatDate(svc.service_date)}</div>
+
+                  {/* Clickable date area */}
+                  <div
+                    style={{ minWidth: '180px', cursor: 'pointer' }}
+                    onClick={() => onViewService(svc.id)}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--burgundy)', textDecoration: 'underline', textDecorationColor: 'rgba(61,0,38,0.3)' }}>
+                      {formatDate(svc.service_date)}
+                    </div>
                     {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
                   </div>
+
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
                     {svc.service_type && <span style={{ fontSize: '11px', background: 'var(--gray-100)', color: 'var(--gray-600)', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>{svc.service_type}</span>}
                     {svc.is_communion && <span style={{ fontSize: '11px', background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>🥖 Communion</span>}
                     {svc.spark_title && <span style={{ fontSize: '12px', color: 'var(--gray-800)' }}>"{svc.spark_title}"</span>}
-                    {svc.liturgist && <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Liturgist: {svc.liturgist}</span>}
+                    {svc.liturgist && <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>⛪ {svc.liturgist}</span>}
                   </div>
-                  <div style={{ fontSize: '13px', color: 'var(--gray-400)', minWidth: '60px', textAlign: 'center' }}>🎵 {svc.service_hymns?.length || 0}</div>
+
+                  <div style={{ fontSize: '13px', color: 'var(--gray-400)', minWidth: '60px', textAlign: 'center' }}>
+                    🎵 {svc.service_hymns?.length || 0}
+                  </div>
+
                   <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => onViewService(svc.id)}>View</button>
                     <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc)}>Edit</button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
                   </div>
