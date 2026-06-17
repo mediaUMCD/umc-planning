@@ -13,7 +13,7 @@ function getSeasonStyle(color) {
   return map[color] || { bg: '#f0ede8', color: '#5c5850', dot: '#9b9690' }
 }
 
-export default function Dashboard({ navigate }) {
+export default function Dashboard({ navigate, onViewService }) {
   const [upcoming, setUpcoming] = useState([])
   const [stats, setStats] = useState({ totalDates: 0, totalHymns: 0, pendingUploads: 0 })
   const [loading, setLoading] = useState(true)
@@ -50,7 +50,9 @@ export default function Dashboard({ navigate }) {
   }, [])
 
   const today = new Date().toISOString().slice(0, 10)
-  const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+  })
 
   return (
     <div>
@@ -66,13 +68,21 @@ export default function Dashboard({ navigate }) {
       <div className="page-body">
         {loading ? <div className="spinner" /> : (
           <>
+            {/* Stats */}
             <div className="grid-3" style={{ marginBottom: '24px' }}>
               {[
-                { label: 'Service Dates', value: stats.totalDates, icon: '📅', color: 'var(--burgundy-light)', accent: 'var(--burgundy)' },
-                { label: 'Hymns in Database', value: stats.totalHymns, icon: '🎵', color: '#e8f5ee', accent: 'var(--success)' },
-                { label: 'Pending Uploads', value: stats.pendingUploads, icon: '📤', color: stats.pendingUploads > 0 ? 'var(--warning-light)' : '#e8f5ee', accent: stats.pendingUploads > 0 ? 'var(--warning)' : 'var(--success)' },
+                { label: 'Service Dates', value: stats.totalDates, icon: '📅', color: 'var(--burgundy-light)', accent: 'var(--burgundy)', onClick: () => navigate('planner') },
+                { label: 'Hymns in Database', value: stats.totalHymns, icon: '🎵', color: '#e8f5ee', accent: 'var(--success)', onClick: () => navigate('hymns') },
+                { label: 'Pending Uploads', value: stats.pendingUploads, icon: '📤', color: stats.pendingUploads > 0 ? 'var(--warning-light)' : '#e8f5ee', accent: stats.pendingUploads > 0 ? 'var(--warning)' : 'var(--success)', onClick: () => navigate('uploads') },
               ].map(stat => (
-                <div key={stat.label} className="card" style={{ background: stat.color }}>
+                <div
+                  key={stat.label}
+                  className="card"
+                  onClick={stat.onClick}
+                  style={{ background: stat.color, cursor: 'pointer', transition: 'transform 0.15s' }}
+                  onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                  onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+                >
                   <div style={{ fontSize: '28px', marginBottom: '8px' }}>{stat.icon}</div>
                   <div style={{ fontSize: '28px', fontWeight: 700, color: stat.accent }}>{stat.value}</div>
                   <div style={{ fontSize: '13px', color: 'var(--gray-600)', marginTop: '2px' }}>{stat.label}</div>
@@ -80,7 +90,8 @@ export default function Dashboard({ navigate }) {
               ))}
             </div>
 
-            <div className="card">
+            {/* Upcoming services */}
+            <div className="card" style={{ marginBottom: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '16px', fontWeight: 700 }}>Upcoming Services</h2>
                 <button className="btn btn-primary btn-sm" onClick={() => navigate('planner')}>View All →</button>
@@ -108,19 +119,29 @@ export default function Dashboard({ navigate }) {
                       const style = getSeasonStyle(svc.liturgical_color)
                       const isToday = svc.service_date === today
                       return (
-                        <tr key={svc.id} style={{ background: isToday ? 'var(--burgundy-light)' : '' }}>
+                        <tr
+                          key={svc.id}
+                          style={{ background: isToday ? 'var(--burgundy-light)' : '', cursor: 'pointer' }}
+                          onClick={() => onViewService(svc.id)}
+                          onMouseEnter={e => { if (!isToday) e.currentTarget.style.background = 'var(--gray-50)' }}
+                          onMouseLeave={e => { if (!isToday) e.currentTarget.style.background = '' }}
+                        >
                           <td>
-                            <div style={{ fontWeight: 600 }}>{formatDate(svc.service_date)}</div>
+                            <div style={{ fontWeight: 700, color: 'var(--burgundy)', textDecoration: 'underline', textDecorationColor: 'rgba(61,0,38,0.3)' }}>
+                              {formatDate(svc.service_date)}
+                            </div>
                             {isToday && <span style={{ fontSize: '11px', color: 'var(--burgundy)', fontWeight: 700 }}>TODAY</span>}
                           </td>
                           <td>
-                            <span className="season-badge" style={{ background: style.bg, color: style.color }}>
-                              <span className="status-dot" style={{ background: style.dot }} />
-                              {svc.season || '—'}
-                            </span>
+                            {svc.season ? (
+                              <span className="season-badge" style={{ background: style.bg, color: style.color }}>
+                                <span className="status-dot" style={{ background: style.dot }} />
+                                {svc.season}
+                              </span>
+                            ) : '—'}
                           </td>
                           <td style={{ fontSize: '13px', color: 'var(--gray-600)' }}>{svc.service_type || '—'}</td>
-                          <td style={{ fontSize: '13px' }}>{svc.spark_title || '—'}</td>
+                          <td style={{ fontSize: '13px' }}>{svc.spark_title ? `"${svc.spark_title}"` : '—'}</td>
                           <td style={{ fontSize: '13px' }}>{svc.service_hymns?.length || 0}</td>
                           <td>{svc.is_communion ? '🥖' : '—'}</td>
                         </tr>
@@ -131,16 +152,54 @@ export default function Dashboard({ navigate }) {
               )}
             </div>
 
-            <div className="grid-2" style={{ marginTop: '16px' }}>
-              <button className="card" onClick={() => navigate('planner')} style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none' }}>
+            {/* Quick actions */}
+            <div className="grid-2">
+              <button
+                className="card"
+                onClick={() => navigate('planner')}
+                style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--burgundy)'; e.currentTarget.style.background = 'var(--burgundy-light)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--gray-200)'; e.currentTarget.style.background = 'none' }}
+              >
                 <div style={{ fontSize: '24px', marginBottom: '8px' }}>📅</div>
                 <div style={{ fontWeight: 700, marginBottom: '4px' }}>Plan a Service</div>
                 <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Add hymns, scriptures, spark title and more</div>
               </button>
-              <button className="card" onClick={() => navigate('hymns')} style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none' }}>
+
+              <button
+                className="card"
+                onClick={() => navigate('hymns')}
+                style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--burgundy)'; e.currentTarget.style.background = 'var(--burgundy-light)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--gray-200)'; e.currentTarget.style.background = 'none' }}
+              >
                 <div style={{ fontSize: '24px', marginBottom: '8px' }}>🎵</div>
                 <div style={{ fontWeight: 700, marginBottom: '4px' }}>Hymn Lookup</div>
                 <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Search by number, see last played dates</div>
+              </button>
+
+              <button
+                className="card"
+                onClick={() => navigate('uploads')}
+                style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--burgundy)'; e.currentTarget.style.background = 'var(--burgundy-light)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--gray-200)'; e.currentTarget.style.background = 'none' }}
+              >
+                <div style={{ fontSize: '24px', marginBottom: '8px' }}>📤</div>
+                <div style={{ fontWeight: 700, marginBottom: '4px' }}>Upload Tracker</div>
+                <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Track YouTube and podcast uploads</div>
+              </button>
+
+              <button
+                className="card"
+                onClick={() => navigate('import')}
+                style={{ textAlign: 'left', cursor: 'pointer', border: '2px dashed var(--gray-200)', background: 'none', transition: 'all 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--burgundy)'; e.currentTarget.style.background = 'var(--burgundy-light)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--gray-200)'; e.currentTarget.style.background = 'none' }}
+              >
+                <div style={{ fontSize: '24px', marginBottom: '8px' }}>📥</div>
+                <div style={{ fontWeight: 700, marginBottom: '4px' }}>Bulletin Import</div>
+                <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Upload PDFs to auto-extract service data</div>
               </button>
             </div>
           </>

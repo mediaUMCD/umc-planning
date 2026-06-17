@@ -43,7 +43,7 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return <Dashboard navigate={setPage} />
+      case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} />
       case 'planner': return <ServicePlanner onViewService={navigateToService} />
       case 'service-view': return (
         <ServiceView
