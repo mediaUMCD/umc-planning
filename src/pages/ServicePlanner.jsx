@@ -422,7 +422,7 @@ export default function ServicePlanner({ onViewService }) {
                     </div>
                     <div style={{ width: '80px', flexShrink: 0 }}>
                       <label className="form-label">Number</label>
-                      <input type="number" value={hymn.number} onChange={e => handleHymnNumberChange(idx, e.target.value)} placeholder="###" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                      <input type="text" value={hymn.number} onChange={e => handleHymnNumberChange(idx, e.target.value)} placeholder="###" style={{ padding: '6px 8px', fontSize: '13px' }} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label className="form-label">Title</label>
