@@ -241,11 +241,10 @@ export default function BulletinImport() {
   const removeResult = (idx) => setResults(prev => prev.filter((_, i) => i !== idx))
 
   const saveAll = async () => {
-  const currentResults = [...results]
     setSaving(true)
     let count = 0
-    for (let i = 0; i < currentResults.length; i++) {
-      const result = currentResults[i]
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
       if (result.status !== 'ready' || !result.data?.service_date) continue
       try {
         const { data: existing } = await supabase.from('service_dates').select('id, season, liturgical_color').eq('service_date', result.data.service_date).single()
