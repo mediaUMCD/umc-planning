@@ -26,20 +26,46 @@ async function getPDFText(file) {
   const pages = []
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale: 1 })
+    const pageWidth = viewport.width
+    const midpoint = pageWidth / 2
     const content = await page.getTextContent()
-    // Reconstruct lines from text items using y-position grouping
     const items = content.items
-    const lineMap = {}
-    for (const item of items) {
-      const y = Math.round(item.transform[5])
-      if (!lineMap[y]) lineMap[y] = []
-      lineMap[y].push(item.str)
+
+    // Detect if page has 2 columns by checking x-distribution
+    const leftItems = items.filter(item => item.transform[4] < midpoint)
+    const rightItems = items.filter(item => item.transform[4] >= midpoint)
+    const hasColumns = leftItems.length > 10 && rightItems.length > 10
+
+    let lines = []
+    if (hasColumns) {
+      // Process left column first, then right column
+      const colLines = (colItems) => {
+        const lineMap = {}
+        for (const item of colItems) {
+          const y = Math.round(item.transform[5])
+          if (!lineMap[y]) lineMap[y] = []
+          lineMap[y].push(item.str)
+        }
+        return Object.keys(lineMap)
+          .sort((a, b) => b - a) // descending y = top to bottom
+          .map(y => lineMap[y].join(' ').trim())
+          .filter(l => l.length > 0)
+      }
+      lines = [...colLines(leftItems), ...colLines(rightItems)]
+    } else {
+      // Single column — original approach
+      const lineMap = {}
+      for (const item of items) {
+        const y = Math.round(item.transform[5])
+        if (!lineMap[y]) lineMap[y] = []
+        lineMap[y].push(item.str)
+      }
+      lines = Object.keys(lineMap)
+        .sort((a, b) => b - a)
+        .map(y => lineMap[y].join(' ').trim())
+        .filter(l => l.length > 0)
     }
-    // Sort by y descending (top to bottom) and join
-    const lines = Object.keys(lineMap)
-      .sort((a, b) => b - a)
-      .map(y => lineMap[y].join(' ').trim())
-      .filter(l => l.length > 0)
     pages.push(lines)
   }
   return pages
@@ -97,7 +123,7 @@ function extractData(pages) {
     }
   }
 
-  // ── HYMNS ── Process page 1 line by line
+  // ── HYMNS ── Process page 1 line by line in order (top to bottom)
   const seenNums = new Set()
   const hymnLinePat = new RegExp(`(UMH|TFWS)\\s*#?\\s*(\\d+)`, 'gi')
   const skipKeywords = ["lord's prayer", "lord\u2019s prayer", 'apostle', 'great thanksgiving',
@@ -115,7 +141,6 @@ function extractData(pages) {
       if (PAGE_REFS.has(number) || number < 50) continue
       if (seenNums.has(number)) continue
 
-      // Get title — text before UMH/TFWS
       const prefix = line.slice(0, m.index).trim()
       let title = prefix
         .replace(/^(?:HYMN\s+(?:OF\s+\w+\s+)?|OPENING\s+HYMN\s+|CLOSING\s+HYMN\s+)/i, '')
@@ -123,40 +148,49 @@ function extractData(pages) {
         .trim()
 
       seenNums.add(number)
+      // Push in bulletin order — page1Lines is already sorted top-to-bottom
       result.hymns.push({ hymnal: m[1].toUpperCase(), number, title })
     }
   }
 
   // ── SCRIPTURES ──
-  const readingPat = new RegExp(
-    `(?:FIRST|SECOND|THIRD|GOSPEL|EPISTLE|SCRIPTURE|OLD\\s+TESTAMENT|NEW\\s+TESTAMENT|READING|LESSON)\\s+(?:READING\\s+|LESSON\\s+)?(${BOOK_NAMES})\\s+(\\d+:\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)`,
-    'gi'
-  )
-  const psalmPat = /^PSALM\s+((?:Psalm\s+)?\d+(?::\d+(?:-\d+)?)?)/i
-  const seenRefs = new Set()
-
-  for (const line of page1Lines) {
-    readingPat.lastIndex = 0
-    let m
-    while ((m = readingPat.exec(line)) !== null) {
-      const ref = `${m[1]} ${m[2]}`.trim()
-      if (!seenRefs.has(ref)) {
-        const version = line.includes('NRSVue') ? 'NRSVue' : line.includes('NRSV') ? 'NRSV' : 'CEB'
-        result.scriptures.push({ reference: ref, bible_version: version, is_call_and_response: false })
-        seenRefs.add(ref)
-      }
-    }
-
-    const m2 = psalmPat.exec(line)
-    if (m2 && !line.toLowerCase().includes('umh') && !line.toLowerCase().includes('mpg')) {
-      const raw = m2[1].trim()
-      const ref = raw.toLowerCase().startsWith('psalm') ? raw : `Psalm ${raw}`
-      if (!seenRefs.has(ref)) {
-        result.scriptures.push({ reference: ref, bible_version: 'CEB', is_call_and_response: false })
-        seenRefs.add(ref)
-      }
+const seenRefs = new Set()
+const bookPat = new RegExp(
+  `(${BOOK_NAMES})\\s+(\\d+:\\d+[\\d\\s:;,\\-]*)`,
+  'gi'
+)
+const searchLines = [...page1Lines]
+for (let i = 0; i < page1Lines.length - 1; i++) {
+  searchLines.push(page1Lines[i] + ' ' + page1Lines[i + 1])
+}
+for (const line of searchLines) {
+  const lower = line.toLowerCase()
+  const hasKeyword = ['scripture', 'gospel', 'reading', 'lesson', 'epistle', 'psalm'].some(k => lower.includes(k))
+  if (!hasKeyword) continue
+  if (/^(APOSTLES?|CREED|LORD|DOXOLOGY|OFFERING|PRAYER|JOYS|CONCERNS|PASTORAL|WEEKLY|ANNOUNCE)/i.test(line.trim())) continue
+  bookPat.lastIndex = 0
+  let m
+  while ((m = bookPat.exec(line)) !== null) {
+    let verses = m[2].trim()
+    verses = verses.replace(/\s+(?:p\.|mpg\.|pg\.)\s*[\d,\-\s]+.*$/, '').trim()
+    verses = verses.replace(/[;,\s]+$/, '').trim()
+    const ref = `${m[1]} ${verses}`.trim()
+    if (!seenRefs.has(ref) && ref.length > 3 && /\d/.test(ref)) {
+      const version = line.includes('NRSVue') ? 'NRSVue' : line.includes('NRSV') ? 'NRSV' : 'CEB'
+      result.scriptures.push({ reference: ref, bible_version: version, is_call_and_response: false })
+      seenRefs.add(ref)
     }
   }
+  const psalmM = /^PSALM\s+((?:Psalm\s+)?\d+(?::\d+(?:-\d+)?)?)/i.exec(line)
+  if (psalmM && !lower.includes('umh') && !lower.includes('mpg')) {
+    const raw = psalmM[1].trim()
+    const ref = raw.toLowerCase().startsWith('psalm') ? raw : `Psalm ${raw}`
+    if (!seenRefs.has(ref)) {
+      result.scriptures.push({ reference: ref, bible_version: 'CEB', is_call_and_response: false })
+      seenRefs.add(ref)
+    }
+  }
+}
 
   // ── MESSAGE TITLE ──
   for (const line of page1Lines) {
