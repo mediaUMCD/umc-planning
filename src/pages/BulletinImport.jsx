@@ -113,7 +113,7 @@ function extractData(pages) {
 
   if (!result.season) {
     // Format 2 — search all lines
-    const seasonPat = /(\d+(?:st|nd|rd|th)\s+Sunday\s+(?:after|of)\s+\w+|(?:First|Second|Third|Fourth)\s+Sunday\s+(?:after|of)\s+\w+|Ash Wednesday|Maundy Thursday|Good Friday|Palm Sunday|Transfiguration Sunday|Trinity Sunday|All Saints Day|Christ the King Sunday|Easter Sunday|Pentecost Sunday|Baptism of the Lord|Rally Day)/i
+    const seasonPat = /(\d+(?:st|nd|rd|th)\s+Sunday\s+(?:after|of)\s+\w+|(?:First|Second|Third|Fourth)\s+Sunday\s+(?:after|of)\s+\w+|Children(?:'s)?\s+Sunday[^\n,]*|Ash Wednesday|Maundy Thursday|Good Friday|Palm Sunday|Transfiguration Sunday|Trinity Sunday|All Saints Day|Christ the King Sunday|Easter Sunday|Pentecost(?:\s+Sunday)?|Baptism of the Lord|Rally Day)/i
     for (const line of allLines) {
       const m = seasonPat.exec(line)
       if (m && !line.toLowerCase().includes('davis place') && !line.toLowerCase().includes('sunday school')) {
