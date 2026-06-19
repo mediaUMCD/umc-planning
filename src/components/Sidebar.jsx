@@ -1,11 +1,11 @@
 import { supabase } from '../lib/supabase.js'
 
 const NAV_ITEMS = [
-  { id: 'dashboard', icon: '🏠', label: 'Dashboard' },
-  { id: 'planner', icon: '📅', label: 'Service Planner' },
-  { id: 'hymns', icon: '🎵', label: 'Hymn Tracker' },
-  { id: 'uploads', icon: '📤', label: 'Upload Tracker' },
-  { id: 'import', icon: '📥', label: 'Bulletin Import' },
+  { id: 'dashboard', icon: '/icons/icon-dashboard.png', label: 'Dashboard' },
+  { id: 'planner', icon: '/icons/icon-service-planner.png', label: 'Service Planner' },
+  { id: 'hymns', icon: '/icons/icon-hymn-tracker.png', label: 'Hymn Tracker' },
+  { id: 'uploads', icon: '/icons/icon-upload-tracker.png', label: 'Upload Tracker' },
+  { id: 'import', icon: '/icons/icon-bulletin-import.png', label: 'Bulletin Import' },
 ]
 
 const OTHER_APPS = [
@@ -23,7 +23,7 @@ export default function Sidebar({ page, navigate, session }) {
     <div className="sidebar">
       {/* Logo */}
       <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-        <div style={{ fontSize: '24px', marginBottom: '6px' }}>✝</div>
+        <img src="/icons/icon-service-planner.png" alt="" style={{ width: '32px', height: '32px', marginBottom: '6px' }} />
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'white', lineHeight: 1.3 }}>
           UMCD<br />Planning Hub
         </div>
@@ -48,7 +48,7 @@ export default function Sidebar({ page, navigate, session }) {
               transition: 'all 0.15s',
             }}
           >
-            <span style={{ fontSize: '16px' }}>{item.icon}</span>
+            <img src={item.icon} alt="" style={{ width: '20px', height: '20px', flexShrink: 0 }} />
             {item.label}
           </button>
         ))}

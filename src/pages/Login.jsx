@@ -20,7 +20,7 @@ export default function Login() {
     <div style={{ minHeight: '100vh', background: 'var(--burgundy)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div style={{ background: 'white', borderRadius: '16px', padding: '40px', width: '100%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-          <div style={{ fontSize: '40px', marginBottom: '8px' }}>✝</div>
+          <img src="/icons/icon-service-planner.png" alt="" style={{ width: '64px', height: '64px', marginBottom: '8px' }} />
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)', fontWeight: 700, marginBottom: '4px' }}>UMCD Planning Hub</h1>
           <p style={{ fontSize: '13px', color: 'var(--gray-400)' }}>United Methodist Church of Danielson</p>
         </div>
