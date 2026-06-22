@@ -207,8 +207,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
   async function loadHymns() {
     const { data } = await supabase.from('hymns').select('hymnal, number, title')
-    // Sort numerically since number is now a text column
-    const sorted = (data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number))
+    const sorted = (data || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
     setHymns(sorted)
   }
 
@@ -231,17 +230,13 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   function lookupHymnTitle(hymnal, number) {
-    // number column is now TEXT — match by string comparison of the numeric part
-    const numStr = String(parseInt(number))
-    // First try exact match (for non-duplicates like '700')
-    let h = hymns.find(h => h.hymnal === hymnal && String(h.number) === numStr)
-    // If not found, try with 'a' suffix (first entry for duplicate numbers like '208a')
-    if (!h) h = hymns.find(h => h.hymnal === hymnal && String(h.number) === numStr + 'a')
+    const num = parseFloat(number)
+    const h = hymns.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
     return h ? h.title : ''
   }
 
   function handleHymnNumberChange(idx, number) {
-    const num = parseInt(number)
+    const num = parseFloat(number)
     // Only block PAGE_REFS for short numbers (1-2 digits) — don't block mid-typing of 710, 800, etc.
     if (number.length <= 2 && !isNaN(num) && PAGE_REFS.has(num)) {
       setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number } : h))
@@ -640,9 +635,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                       <input type="text" value={hymn.title} onChange={e => setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, title: e.target.value } : h))} placeholder="Auto-filled from number" style={{ padding: '6px 8px', fontSize: '13px' }} />
                     </div>
                   </div>
-                  {hymn.number && hymnHistory[`${hymn.hymnal}-${parseInt(hymn.number)}`] && (
+                  {hymn.number && hymnHistory[`${hymn.hymnal}-${parseFloat(hymn.number)}`] && (
                     <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '4px' }}>
-                      Last played: {new Date(hymnHistory[`${hymn.hymnal}-${parseInt(hymn.number)}`] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      Last played: {new Date(hymnHistory[`${hymn.hymnal}-${parseFloat(hymn.number)}`] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
                   )}
                   <label className="checkbox-label" style={{ fontSize: '13px', marginTop: '8px' }}>
