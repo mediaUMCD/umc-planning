@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
+import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 
 const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
@@ -152,7 +153,21 @@ const EMPTY_FORM = {
   service_date: '', season: '', liturgical_color: '', service_type: 'Regular Sunday',
   is_communion: false, sermon_series: '', spark_title: '', spark_preacher: 'Pastor Zach',
   kids_story_teller: '', liturgist: '', notes: '',
+  // Bulletin content
+  call_to_worship_text: '', call_to_worship_source: '',
+  offertory_prayer_text: '', offering_prayer_source: 'Offering Prayer from umcdiscipleship.org',
+  children_message_label: "CHILDREN'S MESSAGE", children_message_person: '',
+  special_music_person: '',
+  apostles_creed_ref: 'UMH #881', pastoral_prayer_person: 'Pastor Zach',
+  lords_prayer_leader: 'Youth', doxology_ref: 'UMH #95',
+  announcements_reader: '', announcements_list: '',
+  next_week_liturgist: '',
+  bulletin_orientation: 'landscape',
+  special_designation: '', service_time: '10:15 a.m.',
+  back_cover_photo_url: '',
 }
+
+const CHILDREN_MESSAGE_LABELS = ["CHILDREN'S MESSAGE", 'CELEBRATING OUR CHILDREN']
 
 export default function ServicePlanner({ onViewService }) {
   const [view, setView] = useState('list')
@@ -164,9 +179,10 @@ export default function ServicePlanner({ onViewService }) {
   const [hymns, setHymns] = useState([])
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
-  const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }])
-  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }])
+  const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
+  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
 
   useEffect(() => { loadServices(); loadHymns() }, [])
 
@@ -208,16 +224,17 @@ export default function ServicePlanner({ onViewService }) {
     }))
   }
 
-  function addHymn() { setServiceHymns(prev => [...prev, { hymnal: 'UMH', number: '', title: '', sort_order: prev.length + 1 }]) }
+  function addHymn() { setServiceHymns(prev => [...prev, { hymnal: 'UMH', number: '', title: '', sort_order: prev.length + 1, is_closing: false }]) }
   function removeHymn(idx) { setServiceHymns(prev => prev.filter((_, i) => i !== idx).map((h, i) => ({ ...h, sort_order: i + 1 }))) }
-  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1 }]) }
+  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1, page_reference: '', is_gospel: false }]) }
   function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
+  function updateHymn(idx, field, value) { setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, [field]: value } : h)) }
 
   function startNew() {
     setForm(EMPTY_FORM)
-    setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }])
-    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }])
+    setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
+    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
     setEditingService(null); setView('edit'); setSaveStatus(null)
   }
 
@@ -235,19 +252,41 @@ export default function ServicePlanner({ onViewService }) {
       kids_story_teller: svc.kids_story_teller || '',
       liturgist: svc.liturgist || '',
       notes: svc.notes || '',
+      // Bulletin content
+      call_to_worship_text: svc.call_to_worship_text || '',
+      call_to_worship_source: svc.call_to_worship_source || '',
+      offertory_prayer_text: svc.offertory_prayer_text || '',
+      offering_prayer_source: svc.offering_prayer_source || 'Offering Prayer from umcdiscipleship.org',
+      children_message_label: svc.children_message_label || "CHILDREN'S MESSAGE",
+      children_message_person: svc.children_message_person || '',
+      special_music_person: svc.special_music_person || '',
+      apostles_creed_ref: svc.apostles_creed_ref || 'UMH #881',
+      pastoral_prayer_person: svc.pastoral_prayer_person || 'Pastor Zach',
+      lords_prayer_leader: svc.lords_prayer_leader || 'Youth',
+      doxology_ref: svc.doxology_ref || 'UMH #95',
+      announcements_reader: svc.announcements_reader || '',
+      announcements_list: svc.announcements_list || '',
+      next_week_liturgist: svc.next_week_liturgist || '',
+      bulletin_orientation: svc.bulletin_orientation || 'landscape',
+      special_designation: svc.special_designation || '',
+      service_time: svc.service_time || '10:15 a.m.',
+      back_cover_photo_url: svc.back_cover_photo_url || '',
     })
     setServiceHymns(
       svc.service_hymns?.length
         ? svc.service_hymns.sort((a, b) => a.sort_order - b.sort_order).map(h => ({
             hymnal: h.hymnal, number: String(h.number),
             title: lookupHymnTitle(h.hymnal, h.number), sort_order: h.sort_order,
+            is_closing: h.is_closing || false,
           }))
-        : [{ hymnal: 'UMH', number: '', title: '', sort_order: 1 }]
+        : [{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }]
     )
     setServiceScriptures(
       svc.service_scriptures?.length
-        ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order)
-        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1 }]
+        ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order).map(s => ({
+            ...s, page_reference: s.page_reference || '', is_gospel: s.is_gospel || false,
+          }))
+        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }]
     )
     setEditingService(svc); setView('edit'); setSaveStatus(null)
   }
@@ -275,13 +314,13 @@ export default function ServicePlanner({ onViewService }) {
       const validHymns = serviceHymns.filter(h => h.number && !PAGE_REFS.has(parseInt(h.number)))
       if (validHymns.length > 0) {
         await supabase.from('service_hymns').insert(
-          validHymns.map(h => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: h.sort_order }))
+          validHymns.map(h => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: h.sort_order, is_closing: h.is_closing || false }))
         )
       }
       const validScriptures = serviceScriptures.filter(s => s.reference)
       if (validScriptures.length > 0) {
         await supabase.from('service_scriptures').insert(
-          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order }))
+          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false }))
         )
       }
       setSaveStatus('success'); loadServices()
@@ -388,10 +427,139 @@ export default function ServicePlanner({ onViewService }) {
                   {STORYTELLERS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label className="form-label">Liturgist</label>
-                <input type="text" value={form.liturgist} onChange={e => setForm(f => ({ ...f, liturgist: e.target.value }))} placeholder="e.g. Cyndi Perkins" />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Today's Liturgist</label>
+                  <input type="text" value={form.liturgist} onChange={e => setForm(f => ({ ...f, liturgist: e.target.value }))} placeholder="e.g. Cyndi Perkins" />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Next Week's Liturgist</label>
+                  <input type="text" value={form.next_week_liturgist} onChange={e => setForm(f => ({ ...f, next_week_liturgist: e.target.value }))} placeholder="e.g. Scott Richards" />
+                </div>
               </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🙏 Call to Worship</h2>
+              <div className="form-group">
+                <label className="form-label">Full Text</label>
+                <textarea value={form.call_to_worship_text} onChange={e => setForm(f => ({ ...f, call_to_worship_text: e.target.value }))} placeholder="There is no one like you, God of Abraham and Sarah..." style={{ minHeight: '140px' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Source Citation</label>
+                <input type="text" value={form.call_to_worship_source} onChange={e => setForm(f => ({ ...f, call_to_worship_source: e.target.value }))} placeholder="e.g. Lectionary Worship Aids: Series VIII, Cycle A..." />
+              </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🕊️ Offertory Prayer</h2>
+              <div className="form-group">
+                <label className="form-label">Full Text</label>
+                <textarea value={form.offertory_prayer_text} onChange={e => setForm(f => ({ ...f, offertory_prayer_text: e.target.value }))} placeholder="Listening God, you hear the cries we whisper..." style={{ minHeight: '140px' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Source Citation</label>
+                <input type="text" value={form.offering_prayer_source} onChange={e => setForm(f => ({ ...f, offering_prayer_source: e.target.value }))} placeholder="e.g. Offering Prayer from umcdiscipleship.org" />
+              </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>📋 Order of Service — Other Fields</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Children's Message Label</label>
+                  <select value={form.children_message_label} onChange={e => setForm(f => ({ ...f, children_message_label: e.target.value }))}>
+                    {CHILDREN_MESSAGE_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Children's Message By</label>
+                  <input type="text" value={form.children_message_person} onChange={e => setForm(f => ({ ...f, children_message_person: e.target.value }))} placeholder="e.g. Chrissy Pagano" />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Special Music</label>
+                <input type="text" value={form.special_music_person} onChange={e => setForm(f => ({ ...f, special_music_person: e.target.value }))} placeholder="e.g. Pastor Zach" />
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Apostles' Creed</label>
+                  <input type="text" value={form.apostles_creed_ref} onChange={e => setForm(f => ({ ...f, apostles_creed_ref: e.target.value }))} placeholder="UMH #881 (leave blank to omit)" />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Doxology</label>
+                  <input type="text" value={form.doxology_ref} onChange={e => setForm(f => ({ ...f, doxology_ref: e.target.value }))} placeholder="UMH #95" />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Joys & Concerns / Pastoral Prayer</label>
+                  <input type="text" value={form.pastoral_prayer_person} onChange={e => setForm(f => ({ ...f, pastoral_prayer_person: e.target.value }))} placeholder="e.g. Pastor Zach" />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Lord's Prayer Led By</label>
+                  <input type="text" value={form.lords_prayer_leader} onChange={e => setForm(f => ({ ...f, lords_prayer_leader: e.target.value }))} placeholder="e.g. Youth" />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Weekly Announcements Read By</label>
+                <input type="text" value={form.announcements_reader} onChange={e => setForm(f => ({ ...f, announcements_reader: e.target.value }))} placeholder="e.g. Betsy Kneeland" />
+              </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>📣 Announcements List <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(Page 2)</span></h2>
+              <textarea value={form.announcements_list} onChange={e => setForm(f => ({ ...f, announcements_list: e.target.value }))} placeholder={'One per line, e.g.:\nToday: Luncheon after Church – bring a side dish to share.\n6/27: Grief Group @ 10:15 a.m.'} style={{ minHeight: '100px' }} />
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🖨️ Bulletin Layout</h2>
+              <div className="form-group">
+                <label className="form-label">Orientation</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, bulletin_orientation: 'landscape' }))}
+                    className="btn"
+                    style={{ flex: 1, background: form.bulletin_orientation === 'landscape' ? 'var(--burgundy)' : 'var(--gray-100)', color: form.bulletin_orientation === 'landscape' ? 'white' : 'var(--gray-800)' }}
+                  >
+                    🖥️ Landscape (2-col)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, bulletin_orientation: 'portrait' }))}
+                    className="btn"
+                    style={{ flex: 1, background: form.bulletin_orientation === 'portrait' ? 'var(--burgundy)' : 'var(--gray-100)', color: form.bulletin_orientation === 'portrait' ? 'white' : 'var(--gray-800)' }}
+                  >
+                    📄 Portrait (1-col)
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Special Designation</label>
+                  <input type="text" value={form.special_designation} onChange={e => setForm(f => ({ ...f, special_designation: e.target.value }))} placeholder="e.g. Children's Sunday – 3rd After Pentecost" />
+                </div>
+                <div className="form-group" style={{ width: '120px', flexShrink: 0 }}>
+                  <label className="form-label">Service Time</label>
+                  <input type="text" value={form.service_time} onChange={e => setForm(f => ({ ...f, service_time: e.target.value }))} placeholder={form.special_designation ? 'Morning Service 10:15 a.m.' : '10:15 a.m.'} />
+                </div>
+              </div>
+              {editingService && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg"
+                  style={{ width: '100%', marginTop: '4px' }}
+                  onClick={() => setShowGenerateModal(true)}
+                >
+                  📄 Generate Bulletin
+                </button>
+              )}
+              {!editingService && (
+                <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontStyle: 'italic', marginTop: '4px' }}>
+                  Save the service first to generate its bulletin.
+                </div>
+              )}
             </div>
 
             <div className="card">
@@ -429,6 +597,10 @@ export default function ServicePlanner({ onViewService }) {
                       <input type="text" value={hymn.title} onChange={e => setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, title: e.target.value } : h))} placeholder="Auto-filled from number" style={{ padding: '6px 8px', fontSize: '13px' }} />
                     </div>
                   </div>
+                  <label className="checkbox-label" style={{ fontSize: '13px', marginTop: '8px' }}>
+                    <input type="checkbox" checked={hymn.is_closing || false} onChange={e => updateHymn(idx, 'is_closing', e.target.checked)} />
+                    Closing hymn (for bulletin)
+                  </label>
                 </div>
               ))}
             </div>
@@ -455,12 +627,22 @@ export default function ServicePlanner({ onViewService }) {
                         {BIBLE_VERSIONS.map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
                     </div>
+                    <div style={{ width: '110px', flexShrink: 0 }}>
+                      <label className="form-label">Page(s)</label>
+                      <input type="text" value={s.page_reference || ''} onChange={e => updateScripture(idx, 'page_reference', e.target.value)} placeholder="e.g. 17-18" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                    </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <label className="checkbox-label" style={{ fontSize: '13px' }}>
-                      <input type="checkbox" checked={s.is_call_and_response} onChange={e => updateScripture(idx, 'is_call_and_response', e.target.checked)} />
-                      Call & Response
-                    </label>
+                    <div style={{ display: 'flex', gap: '14px' }}>
+                      <label className="checkbox-label" style={{ fontSize: '13px' }}>
+                        <input type="checkbox" checked={s.is_call_and_response} onChange={e => updateScripture(idx, 'is_call_and_response', e.target.checked)} />
+                        Call & Response
+                      </label>
+                      <label className="checkbox-label" style={{ fontSize: '13px' }}>
+                        <input type="checkbox" checked={s.is_gospel || false} onChange={e => updateScripture(idx, 'is_gospel', e.target.checked)} />
+                        Gospel Lesson
+                      </label>
+                    </div>
                     {s.reference && <a href={buildBibleGatewayUrl(s.reference, s.bible_version)} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600 }}>🔗 Bible Gateway</a>}
                   </div>
                 </div>
@@ -468,6 +650,15 @@ export default function ServicePlanner({ onViewService }) {
             </div>
           </div>
         </div>
+
+        {showGenerateModal && editingService && (
+          <BulletinGenerateModal
+            service={{ ...form, id: editingService.id }}
+            hymns={serviceHymns}
+            scriptures={serviceScriptures}
+            onClose={() => setShowGenerateModal(false)}
+          />
+        )}
       </div>
     )
   }

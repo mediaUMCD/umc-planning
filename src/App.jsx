@@ -7,6 +7,7 @@ import ServiceView from './pages/ServiceView.jsx'
 import HymnTracker from './pages/HymnTracker.jsx'
 import UploadTracker from './pages/UploadTracker.jsx'
 import BulletinImport from './pages/BulletinImport.jsx'
+import BulletinSettings from './pages/BulletinSettings.jsx'
 import Sidebar from './components/Sidebar.jsx'
 
 export default function App() {
@@ -55,6 +56,7 @@ export default function App() {
       case 'hymns': return <HymnTracker />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
+      case 'bulletin-settings': return <BulletinSettings />
       default: return <Dashboard navigate={setPage} />
     }
   }
