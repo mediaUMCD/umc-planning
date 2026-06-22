@@ -206,8 +206,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   async function loadHymns() {
-    const { data } = await supabase.from('hymns').select('hymnal, number, title').order('number')
-    setHymns(data || [])
+    const { data } = await supabase.from('hymns').select('hymnal, number, title')
+    // Sort numerically since number is now a text column
+    const sorted = (data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number))
+    setHymns(sorted)
   }
 
   async function loadHymnHistory() {
@@ -229,7 +231,12 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   function lookupHymnTitle(hymnal, number) {
-    const h = hymns.find(h => h.hymnal === hymnal && h.number === parseInt(number))
+    // number column is now TEXT — match by string comparison of the numeric part
+    const numStr = String(parseInt(number))
+    // First try exact match (for non-duplicates like '700')
+    let h = hymns.find(h => h.hymnal === hymnal && String(h.number) === numStr)
+    // If not found, try with 'a' suffix (first entry for duplicate numbers like '208a')
+    if (!h) h = hymns.find(h => h.hymnal === hymnal && String(h.number) === numStr + 'a')
     return h ? h.title : ''
   }
 
