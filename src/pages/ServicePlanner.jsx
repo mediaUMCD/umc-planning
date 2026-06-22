@@ -234,21 +234,14 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   function handleHymnNumberChange(idx, number) {
-    // Allow typing freely — only validate when number is complete (non-empty and not mid-type)
-    // Don't block single digits like 7/8/9 which are also in PAGE_REFS
     const num = parseInt(number)
-    // Only block PAGE_REFS if the number is fully entered (no partial typing)
-    // A partial entry like "7" could be start of "710", so only block exact matches
-    // when the number is short (1-2 digits that can't be hymn numbers)
-    const isComplete = number.length >= 3 || (number.length > 0 && num > 0 && !isNaN(num))
-    if (isComplete && number.length <= 2 && PAGE_REFS.has(num)) {
-      // It's a page ref (like 7, 8, 9, 10, 11..14), not a hymn number - block
+    // Only block PAGE_REFS for short numbers (1-2 digits) — don't block mid-typing of 710, 800, etc.
+    if (number.length <= 2 && !isNaN(num) && PAGE_REFS.has(num)) {
       setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number } : h))
       return
     }
-    // Respect the user's manual hymnal selection — only auto-switch if they type a 4-digit TFWS number
+    // Respect the user's manual hymnal selection — only auto-switch to TFWS at 1000+
     const currentHymnal = serviceHymns[idx]?.hymnal || 'UMH'
-    const num = parseInt(number)
     const hymnal = (!isNaN(num) && num >= 1000) ? 'TFWS' : currentHymnal
     const title = lookupHymnTitle(hymnal, number)
     setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number, hymnal, title } : h))
