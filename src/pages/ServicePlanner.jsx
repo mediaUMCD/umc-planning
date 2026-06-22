@@ -169,7 +169,7 @@ const EMPTY_FORM = {
 
 const CHILDREN_MESSAGE_LABELS = ["CHILDREN'S MESSAGE", 'CELEBRATING OUR CHILDREN']
 
-export default function ServicePlanner({ onViewService }) {
+export default function ServicePlanner({ onViewService, editServiceId, onClearEditId }) {
   const [view, setView] = useState('list')
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -182,9 +182,21 @@ export default function ServicePlanner({ onViewService }) {
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
+  const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
   const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
 
-  useEffect(() => { loadServices(); loadHymns() }, [])
+  useEffect(() => { loadServices(); loadHymns(); loadHymnHistory() }, [])
+
+  // When navigating here from ServiceView's Edit button, open that service directly
+  useEffect(() => {
+    if (editServiceId && services.length > 0) {
+      const svc = services.find(s => s.id === editServiceId)
+      if (svc) {
+        startEdit(svc)
+        if (onClearEditId) onClearEditId()
+      }
+    }
+  }, [editServiceId, services])
 
   async function loadServices() {
     setLoading(true)
@@ -198,15 +210,46 @@ export default function ServicePlanner({ onViewService }) {
     setHymns(data || [])
   }
 
+  async function loadHymnHistory() {
+    // Get all past hymn uses with their service dates, newest first
+    const { data } = await supabase
+      .from('service_hymns')
+      .select('hymnal, number, service_date_id, service_dates(service_date)')
+      .order('service_date_id', { ascending: false })
+    if (!data) return
+    // Build lookup: first occurrence of each hymnal-number combo = most recent use
+    const history = {}
+    for (const h of data) {
+      const key = `${h.hymnal}-${h.number}`
+      if (!history[key] && h.service_dates?.service_date) {
+        history[key] = h.service_dates.service_date
+      }
+    }
+    setHymnHistory(history)
+  }
+
   function lookupHymnTitle(hymnal, number) {
     const h = hymns.find(h => h.hymnal === hymnal && h.number === parseInt(number))
     return h ? h.title : ''
   }
 
   function handleHymnNumberChange(idx, number) {
+    // Allow typing freely — only validate when number is complete (non-empty and not mid-type)
+    // Don't block single digits like 7/8/9 which are also in PAGE_REFS
     const num = parseInt(number)
-    if (PAGE_REFS.has(num)) return
-    const hymnal = num >= 1000 ? 'TFWS' : 'UMH'
+    // Only block PAGE_REFS if the number is fully entered (no partial typing)
+    // A partial entry like "7" could be start of "710", so only block exact matches
+    // when the number is short (1-2 digits that can't be hymn numbers)
+    const isComplete = number.length >= 3 || (number.length > 0 && num > 0 && !isNaN(num))
+    if (isComplete && number.length <= 2 && PAGE_REFS.has(num)) {
+      // It's a page ref (like 7, 8, 9, 10, 11..14), not a hymn number - block
+      setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number } : h))
+      return
+    }
+    // Respect the user's manual hymnal selection — only auto-switch if they type a 4-digit TFWS number
+    const currentHymnal = serviceHymns[idx]?.hymnal || 'UMH'
+    const num = parseInt(number)
+    const hymnal = (!isNaN(num) && num >= 1000) ? 'TFWS' : currentHymnal
     const title = lookupHymnTitle(hymnal, number)
     setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, number, hymnal, title } : h))
   }
@@ -588,15 +631,20 @@ export default function ServicePlanner({ onViewService }) {
                         <option value="TFWS">TFWS</option>
                       </select>
                     </div>
-                    <div style={{ width: '80px', flexShrink: 0 }}>
+                    <div style={{ width: '100px', flexShrink: 0 }}>
                       <label className="form-label">Number</label>
-                      <input type="text" value={hymn.number} onChange={e => handleHymnNumberChange(idx, e.target.value)} placeholder="###" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                      <input type="text" value={hymn.number} onChange={e => handleHymnNumberChange(idx, e.target.value)} placeholder="###" style={{ padding: '6px 8px', fontSize: '13px', width: '100%' }} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label className="form-label">Title</label>
                       <input type="text" value={hymn.title} onChange={e => setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, title: e.target.value } : h))} placeholder="Auto-filled from number" style={{ padding: '6px 8px', fontSize: '13px' }} />
                     </div>
                   </div>
+                  {hymn.number && hymnHistory[`${hymn.hymnal}-${parseInt(hymn.number)}`] && (
+                    <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '4px' }}>
+                      Last played: {new Date(hymnHistory[`${hymn.hymnal}-${parseInt(hymn.number)}`] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                  )}
                   <label className="checkbox-label" style={{ fontSize: '13px', marginTop: '8px' }}>
                     <input type="checkbox" checked={hymn.is_closing || false} onChange={e => updateHymn(idx, 'is_closing', e.target.checked)} />
                     Closing hymn (for bulletin)

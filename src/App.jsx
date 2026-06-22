@@ -15,6 +15,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [page, setPage] = useState('dashboard')
   const [selectedServiceId, setSelectedServiceId] = useState(null)
+  const [editServiceId, setEditServiceId] = useState(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -39,18 +40,30 @@ export default function App() {
 
   const navigateToService = (id) => {
     setSelectedServiceId(id)
+    setEditServiceId(null)
     setPage('service-view')
+  }
+
+  const navigateToEdit = (id) => {
+    setEditServiceId(id)
+    setPage('planner')
   }
 
   const renderPage = () => {
     switch (page) {
       case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} />
-      case 'planner': return <ServicePlanner onViewService={navigateToService} />
+      case 'planner': return (
+        <ServicePlanner
+          onViewService={navigateToService}
+          editServiceId={editServiceId}
+          onClearEditId={() => setEditServiceId(null)}
+        />
+      )
       case 'service-view': return (
         <ServiceView
           serviceId={selectedServiceId}
           onBack={() => setPage('planner')}
-          onEdit={() => setPage('planner')}
+          onEdit={() => navigateToEdit(selectedServiceId)}
         />
       )
       case 'hymns': return <HymnTracker />
