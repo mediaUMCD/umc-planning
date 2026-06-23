@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 
@@ -177,6 +177,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [searchDate, setSearchDate] = useState('')
   const [editingService, setEditingService] = useState(null)
   const [hymns, setHymns] = useState([])
+  const hymnsRef = useRef([]) // always-current hymns for use in callbacks
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
@@ -187,26 +188,28 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
   useEffect(() => { 
     const init = async () => {
-      // Load hymns FIRST so titles are available when services load
-      const { data } = await supabase.from('hymns').select('hymnal, number, title')
-      const sorted = (data || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
+      const { data: hymnData } = await supabase.from('hymns').select('hymnal, number, title')
+      const sorted = (hymnData || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
       setHymns(sorted)
-      await loadServices()
+      hymnsRef.current = sorted
+
+      const { data: svcData } = await supabase.from('service_dates').select('*, service_hymns(*), service_scriptures(*)').order('service_date', { ascending: true })
+      setServices(svcData || [])
+      setLoading(false)
+
+      // If we came from ServiceView's Edit button, open that service directly
+      if (editServiceId && svcData) {
+        const svc = svcData.find(s => s.id === editServiceId)
+        if (svc) {
+          startEdit(svc, sorted)
+          if (onClearEditId) onClearEditId()
+        }
+      }
+
       loadHymnHistory()
     }
     init()
   }, [])
-
-  // When navigating here from ServiceView's Edit button, open that service directly
-  useEffect(() => {
-    if (editServiceId && services.length > 0 && hymns.length > 0) {
-      const svc = services.find(s => s.id === editServiceId)
-      if (svc) {
-        startEdit(svc, hymns)
-        if (onClearEditId) onClearEditId()
-      }
-    }
-  }, [editServiceId, services, hymns])
 
   async function loadServices() {
     setLoading(true)
@@ -244,9 +247,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setHymnHistory(history)
   }
 
-  function lookupHymnTitle(hymnal, number, hymnsList = hymns) {
+  function lookupHymnTitle(hymnal, number, hymnsList) {
+    const list = hymnsList || hymnsRef.current || hymns
     const num = parseFloat(number)
-    const h = hymnsList.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
+    const h = list.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
     return h ? h.title : ''
   }
 
@@ -783,7 +787,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
                   <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => onViewService(svc.id)}>View</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc, hymns)}>Edit</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc, hymnsRef.current)}>Edit</button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
                   </div>
                 </div>
