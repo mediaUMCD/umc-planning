@@ -185,18 +185,28 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
   const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
 
-  useEffect(() => { loadServices(); loadHymns(); loadHymnHistory() }, [])
+  useEffect(() => { 
+    const init = async () => {
+      // Load hymns FIRST so titles are available when services load
+      const { data } = await supabase.from('hymns').select('hymnal, number, title')
+      const sorted = (data || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
+      setHymns(sorted)
+      await loadServices()
+      loadHymnHistory()
+    }
+    init()
+  }, [])
 
   // When navigating here from ServiceView's Edit button, open that service directly
   useEffect(() => {
-    if (editServiceId && services.length > 0) {
+    if (editServiceId && services.length > 0 && hymns.length > 0) {
       const svc = services.find(s => s.id === editServiceId)
       if (svc) {
-        startEdit(svc)
+        startEdit(svc, hymns)
         if (onClearEditId) onClearEditId()
       }
     }
-  }, [editServiceId, services])
+  }, [editServiceId, services, hymns])
 
   async function loadServices() {
     setLoading(true)
@@ -206,9 +216,14 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   async function loadHymns() {
+    // kept for compatibility but main load is now in useEffect init
     const { data } = await supabase.from('hymns').select('hymnal, number, title')
     const sorted = (data || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
     setHymns(sorted)
+    setServiceHymns(prev => prev.map(h => ({
+      ...h,
+      title: h.title || lookupHymnTitle(h.hymnal, h.number, sorted)
+    })))
   }
 
   async function loadHymnHistory() {
@@ -229,9 +244,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setHymnHistory(history)
   }
 
-  function lookupHymnTitle(hymnal, number) {
+  function lookupHymnTitle(hymnal, number, hymnsList = hymns) {
     const num = parseFloat(number)
-    const h = hymns.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
+    const h = hymnsList.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
     return h ? h.title : ''
   }
 
@@ -276,7 +291,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setEditingService(null); setView('edit'); setSaveStatus(null)
   }
 
-  function startEdit(svc) {
+  function startEdit(svc, hymnsList = hymns) {
     const auto = (!svc.season && !svc.liturgical_color) ? getSeasonFromDate(svc.service_date) : {}
     setForm({
       service_date: svc.service_date,
@@ -314,7 +329,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       svc.service_hymns?.length
         ? svc.service_hymns.sort((a, b) => a.sort_order - b.sort_order).map(h => ({
             hymnal: h.hymnal, number: String(h.number),
-            title: lookupHymnTitle(h.hymnal, h.number), sort_order: h.sort_order,
+            title: lookupHymnTitle(h.hymnal, h.number, hymnsList), sort_order: h.sort_order,
             is_closing: h.is_closing || false,
           }))
         : [{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }]
@@ -768,7 +783,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
                   <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => onViewService(svc.id)}>View</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc)}>Edit</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc, hymns)}>Edit</button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
                   </div>
                 </div>
