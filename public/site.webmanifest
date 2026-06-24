@@ -1,0 +1,20 @@
+{
+  "theme_color": "#3D0026",
+  "background_color": "#F7E6F0",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "name": "UMCD Planning Hub",
+  "short_name": "Planning Hub",
+  "start_url": "/"
+}
