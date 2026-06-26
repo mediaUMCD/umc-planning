@@ -1,12 +1,13 @@
 import { supabase } from '../lib/supabase.js'
 
 const NAV_ITEMS = [
-  { id: 'dashboard', icon: '/icons/icon-dashboard.png', label: 'Dashboard' },
-  { id: 'planner', icon: '/icons/icon-service-planner.png', label: 'Service Planner' },
-  { id: 'hymns', icon: '/icons/icon-hymn-tracker.png', label: 'Hymn Tracker' },
-  { id: 'uploads', icon: '/icons/icon-upload-tracker.png', label: 'Upload Tracker' },
-  { id: 'import', icon: '/icons/icon-bulletin-import.png', label: 'Bulletin Import' },
-  { id: 'bulletin-settings', icon: '/icons/icon-weekly-bulletin.png', label: 'Bulletin Settings' },
+  { id: 'dashboard',        icon: '/icons/icon-dashboard.png',        label: 'Dashboard' },
+  { id: 'planner',          icon: '/icons/icon-service-planner.png',  label: 'Service Planner' },
+  { id: 'event-planner',    icon: '/icons/icon-dashboard.png',        label: 'Event Planner' },
+  { id: 'hymns',            icon: '/icons/icon-hymn-tracker.png',     label: 'Hymn Tracker' },
+  { id: 'uploads',          icon: '/icons/icon-upload-tracker.png',   label: 'Upload Tracker' },
+  { id: 'import',           icon: '/icons/icon-bulletin-import.png',  label: 'Bulletin Import' },
+  { id: 'bulletin-settings',icon: '/icons/icon-weekly-bulletin.png',  label: 'Bulletin Settings' },
 ]
 
 const OTHER_APPS = [

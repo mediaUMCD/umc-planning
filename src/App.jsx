@@ -8,6 +8,7 @@ import HymnTracker from './pages/HymnTracker.jsx'
 import UploadTracker from './pages/UploadTracker.jsx'
 import BulletinImport from './pages/BulletinImport.jsx'
 import BulletinSettings from './pages/BulletinSettings.jsx'
+import EventPlanner from './pages/EventPlanner.jsx'
 import Sidebar from './components/Sidebar.jsx'
 
 export default function App() {
@@ -70,6 +71,7 @@ export default function App() {
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
+      case 'event-planner': return <EventPlanner />
       default: return <Dashboard navigate={setPage} />
     }
   }
