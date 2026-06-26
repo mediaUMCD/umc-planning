@@ -13,6 +13,7 @@ const BLANK_PROPOSAL = {
   event_name: '', event_date: '', event_end_date: '', event_time: '',
   location: '', description: '', organizer: '', expected_attendance: '',
   entry_fee: '', donations_expected: '', costs: '', support_needed: '',
+  meeting_id: '', missions_meeting_id: '',
 }
 
 const BLANK_PLANNING = {
@@ -27,6 +28,8 @@ const BLANK_PLANNING = {
 
 export default function EventPlanner() {
   const [proposals, setProposals] = useState([])
+  const [boardMeetings, setBoardMeetings] = useState([])
+  const [missionsMeetings, setMissionsMeetings] = useState([])
   const [selected, setSelected] = useState(null)
   const [planning, setPlanning] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -48,11 +51,14 @@ export default function EventPlanner() {
 
   async function loadProposals() {
     setLoading(true)
-    const { data } = await supabase
-      .from('event_proposals')
-      .select('*')
-      .order('event_date', { ascending: true })
-    setProposals(data || [])
+    const [{ data: props }, { data: bm }, { data: mm }] = await Promise.all([
+      supabase.from('event_proposals').select('*').order('event_date', { ascending: true }),
+      supabase.from('board_meetings').select('id, meeting_date').eq('meeting_type', 'one_board').order('meeting_date', { ascending: false }).limit(20),
+      supabase.from('board_meetings').select('id, meeting_date').eq('meeting_type', 'missions').order('meeting_date', { ascending: false }).limit(20),
+    ])
+    setProposals(props || [])
+    setBoardMeetings(bm || [])
+    setMissionsMeetings(mm || [])
     setLoading(false)
   }
 
@@ -120,6 +126,8 @@ export default function EventPlanner() {
       donations_expected: newForm.donations_expected ? parseFloat(newForm.donations_expected) : null,
       cost_items_json: costItems,
       support_needed: newForm.support_needed || null,
+      meeting_id: newForm.meeting_id || null,
+      missions_meeting_id: newForm.missions_meeting_id || null,
       status: 'pending',
     })
     if (err) { setError(err.message); setSubmitting(false); return }
@@ -274,6 +282,25 @@ export default function EventPlanner() {
               <Field label="Support Needed from Board">
                 <textarea className="form-textarea" rows={3} value={newForm.support_needed} onChange={e => setNewForm(f => ({ ...f, support_needed: e.target.value }))} placeholder="Volunteers, budget approval, facilities use…" />
               </Field>
+              <Grid cols={2}>
+                <Field label="Bring to One Board Meeting">
+                  <select className="form-select" value={newForm.meeting_id} onChange={e => setNewForm(f => ({ ...f, meeting_id: e.target.value }))}>
+                    <option value="">None / Not yet scheduled</option>
+                    {boardMeetings.map(m => (
+                      <option key={m.id} value={m.id}>{new Date(m.meeting_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — One Board</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Bring to Missions Meeting">
+                  <select className="form-select" value={newForm.missions_meeting_id} onChange={e => setNewForm(f => ({ ...f, missions_meeting_id: e.target.value }))}>
+                    <option value="">None / Not yet scheduled</option>
+                    {missionsMeetings.map(m => (
+                      <option key={m.id} value={m.id}>{new Date(m.meeting_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — Missions</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>Most events get approved here</div>
+                </Field>
+              </Grid>
             </Section>
 
             <div style={{ display: 'flex', gap: 8 }}>
