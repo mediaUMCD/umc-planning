@@ -138,6 +138,19 @@ export default function EventPlanner() {
   const statusStyle = (status) => STATUS_COLORS[status] || STATUS_COLORS.pending
   const fmtDate = (d) => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''
 
+  async function deleteProposal(e, proposal) {
+    e.stopPropagation()
+    if (!confirm(`Permanently delete "${proposal.event_name}"? This removes it from the Board portal too.`)) return
+    await supabase.from('event_planning_details').delete().eq('proposal_id', proposal.id)
+    await supabase.from('event_proposals').delete().eq('id', proposal.id)
+    if (selected?.id === proposal.id) { setSelected(null); setPlanning(null) }
+    loadAll()
+  }
+
+  const today = new Date().toISOString().slice(0, 10)
+  const activeProposals = proposals.filter(p => !p.event_date || p.event_date >= today)
+  const completedProposals = proposals.filter(p => p.event_date && p.event_date < today)
+
   return (
     <div style={{ display:'grid', gridTemplateColumns:'300px 1fr', gap:0, height:'100%', minHeight:'calc(100vh - 60px)' }}>
 
@@ -158,24 +171,26 @@ export default function EventPlanner() {
             {proposals.length === 0 && !showNewForm && (
               <div style={{ padding:20, color:'var(--gray-400)', fontSize:13 }}>No proposals yet. Create one above.</div>
             )}
-            {proposals.map(p => {
-              const s = statusStyle(p.status)
-              const isSelected = selected?.id === p.id
-              return (
-                <button key={p.id} onClick={() => { selectProposal(p); setShowNewForm(false) }}
-                  style={{ width:'100%', padding:'12px 16px', textAlign:'left',
-                    background: isSelected ? 'var(--blush,#F7E6F0)' : 'transparent',
-                    border:'none', borderBottom:'1px solid var(--border)',
-                    borderLeft: isSelected ? '3px solid var(--wine,#3D0026)' : '3px solid transparent',
-                    cursor:'pointer' }}>
-                  <div style={{ fontWeight:600, fontSize:13, marginBottom:3 }}>{p.event_name}</div>
-                  <div style={{ fontSize:11, color:'var(--gray-500)', marginBottom:4 }}>
-                    {fmtDate(p.event_date)}{p.event_end_date && p.event_end_date !== p.event_date ? ` – ${fmtDate(p.event_end_date)}` : ''}
-                  </div>
-                  <span style={{ display:'inline-block', fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:10, background:s.bg, color:s.color }}>{s.label}</span>
-                </button>
-              )
-            })}
+
+            {/* Active / Upcoming */}
+            {activeProposals.length > 0 && (
+              <>
+                <div style={{ padding:'8px 16px 4px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', color:'var(--gray-400)', borderBottom:'1px solid var(--border)' }}>
+                  Upcoming · {activeProposals.length}
+                </div>
+                {activeProposals.map(p => <ProposalRow key={p.id} p={p} isSelected={selected?.id === p.id} onSelect={() => { selectProposal(p); setShowNewForm(false) }} onDelete={e => deleteProposal(e, p)} statusStyle={statusStyle} fmtDate={fmtDate} />)}
+              </>
+            )}
+
+            {/* Completed / Past */}
+            {completedProposals.length > 0 && (
+              <>
+                <div style={{ padding:'10px 16px 4px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', color:'var(--gray-400)', borderBottom:'1px solid var(--border)', borderTop: activeProposals.length > 0 ? '2px solid var(--border)' : 'none', marginTop: activeProposals.length > 0 ? 8 : 0 }}>
+                  Past Events · {completedProposals.length}
+                </div>
+                {completedProposals.map(p => <ProposalRow key={p.id} p={p} isSelected={selected?.id === p.id} onSelect={() => { selectProposal(p); setShowNewForm(false) }} onDelete={e => deleteProposal(e, p)} statusStyle={statusStyle} fmtDate={fmtDate} faded />)}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -413,4 +428,34 @@ function PlanTable({ headers, rows }) {
 }
 function Rm({ onClick }) {
   return <button onClick={onClick} style={{ background:'none', border:'none', color:'#dc2626', cursor:'pointer', fontWeight:700, padding:'0 4px' }}>×</button>
+}
+
+function ProposalRow({ p, isSelected, onSelect, onDelete, statusStyle, fmtDate, faded }) {
+  const s = statusStyle(p.status)
+  return (
+    <div style={{ position: 'relative', borderBottom: '1px solid var(--border)', opacity: faded ? 0.65 : 1 }}>
+      <button onClick={onSelect} style={{
+        width: '100%', padding: '11px 40px 11px 16px', textAlign: 'left',
+        background: isSelected ? 'var(--blush,#F7E6F0)' : 'transparent',
+        border: 'none',
+        borderLeft: isSelected ? '3px solid var(--wine,#3D0026)' : '3px solid transparent',
+        cursor: 'pointer',
+      }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2, color: 'var(--gray-800)' }}>{p.event_name}</div>
+        <div style={{ fontSize: 11, color: 'var(--gray-500)', marginBottom: 5 }}>
+          {fmtDate(p.event_date)}{p.event_end_date && p.event_end_date !== p.event_date ? ` – ${fmtDate(p.event_end_date)}` : ''}
+          {p.location ? ` · ${p.location}` : ''}
+        </div>
+        <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span>
+      </button>
+      <button onClick={onDelete} title="Delete" style={{
+        position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)',
+        background: 'none', border: 'none', color: '#dc262680', cursor: 'pointer',
+        fontSize: 16, padding: '4px 6px', borderRadius: 4, lineHeight: 1,
+      }}
+        onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+        onMouseLeave={e => e.currentTarget.style.color = '#dc262680'}
+      >✕</button>
+    </div>
+  )
 }
