@@ -21,7 +21,7 @@ const BLANK_PLANNING = {
   setup_sessions: [], congregation_notes: '', internal_notes: '',
 }
 
-export default function EventPlanner() {
+export default function EventPlanner({ onPrint }) {
   const [proposals, setProposals] = useState([])
   const [boardMeetings, setBoardMeetings] = useState([])
   const [missionsMeetings, setMissionsMeetings] = useState([])
@@ -284,6 +284,11 @@ export default function EventPlanner() {
                 {(() => { const s = statusStyle(selected.status); return (
                   <span style={{ fontSize:12, fontWeight:700, padding:'4px 12px', borderRadius:12, background:s.bg, color:s.color }}>Board: {s.label}</span>
                 )})()}
+                {onPrint && (
+                  <button className="btn btn-secondary" style={{ padding:'8px 16px' }} onClick={() => onPrint(selected.id)}>
+                    🖨 Print
+                  </button>
+                )}
                 <button className="btn btn-primary" style={{ padding:'8px 18px' }} onClick={savePlanning} disabled={saving||planningLoading}>
                   {saving ? 'Saving…' : 'Save Plan'}
                 </button>
