@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 
@@ -157,7 +157,7 @@ const EMPTY_FORM = {
   call_to_worship_text: '', call_to_worship_source: '',
   offertory_prayer_text: '', offering_prayer_source: 'Offering Prayer from umcdiscipleship.org',
   children_message_label: "CHILDREN'S MESSAGE", children_message_person: '',
-  special_music_person: '',
+  special_music_title: '', special_music_person: '',
   apostles_creed_ref: 'UMH #881', pastoral_prayer_person: 'Pastor Zach',
   lords_prayer_leader: 'Youth', doxology_ref: 'UMH #95',
   announcements_reader: '', announcements_list: '',
@@ -177,7 +177,6 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [searchDate, setSearchDate] = useState('')
   const [editingService, setEditingService] = useState(null)
   const [hymns, setHymns] = useState([])
-  const hymnsRef = useRef([]) // always-current hymns for use in callbacks
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
@@ -191,7 +190,6 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       const { data: hymnData } = await supabase.from('hymns').select('hymnal, number, title')
       const sorted = (hymnData || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
       setHymns(sorted)
-      hymnsRef.current = sorted
 
       const { data: svcData } = await supabase.from('service_dates').select('*, service_hymns(*), service_scriptures(*)').order('service_date', { ascending: true })
       setServices(svcData || [])
@@ -247,10 +245,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setHymnHistory(history)
   }
 
-  function lookupHymnTitle(hymnal, number, hymnsList) {
-    const list = hymnsList || hymnsRef.current || hymns
+  function lookupHymnTitle(hymnal, number, hymnsList = hymns) {
     const num = parseFloat(number)
-    const h = list.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
+    const h = hymnsList.find(h => h.hymnal === hymnal && parseFloat(h.number) === num)
     return h ? h.title : ''
   }
 
@@ -316,6 +313,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       offering_prayer_source: svc.offering_prayer_source || 'Offering Prayer from umcdiscipleship.org',
       children_message_label: svc.children_message_label || "CHILDREN'S MESSAGE",
       children_message_person: svc.children_message_person || '',
+      special_music_title: svc.special_music_title || '',
       special_music_person: svc.special_music_person || '',
       apostles_creed_ref: svc.apostles_creed_ref || 'UMH #881',
       pastoral_prayer_person: svc.pastoral_prayer_person || 'Pastor Zach',
@@ -535,7 +533,11 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">Special Music</label>
+                <label className="form-label">Special Music Title</label>
+                <input type="text" value={form.special_music_title} onChange={e => setForm(f => ({ ...f, special_music_title: e.target.value }))} placeholder="e.g. Great Is Thy Faithfulness" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Special Music Performed By</label>
                 <input type="text" value={form.special_music_person} onChange={e => setForm(f => ({ ...f, special_music_person: e.target.value }))} placeholder="e.g. Pastor Zach" />
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -787,7 +789,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
                   <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => onViewService(svc.id)}>View</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc, hymnsRef.current)}>Edit</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(svc, hymns)}>Edit</button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(svc)}>Delete</button>
                   </div>
                 </div>

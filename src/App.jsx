@@ -8,9 +8,10 @@ import HymnTracker from './pages/HymnTracker.jsx'
 import UploadTracker from './pages/UploadTracker.jsx'
 import BulletinImport from './pages/BulletinImport.jsx'
 import BulletinSettings from './pages/BulletinSettings.jsx'
-import EventPlanner from './pages/EventPlanner.jsx'
-import PrintEventPlan from './pages/PrintEventPlan.jsx'
+import SetList from './pages/SetList.jsx'
 import Sidebar from './components/Sidebar.jsx'
+
+const PUBLIC_PATHS = ['/setlist', '/setlist/']
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -18,7 +19,11 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [selectedServiceId, setSelectedServiceId] = useState(null)
   const [editServiceId, setEditServiceId] = useState(null)
-  const [printEventId, setPrintEventId] = useState(null)
+
+  // Public, unauthenticated route — no login required, no sidebar
+  if (PUBLIC_PATHS.includes(window.location.pathname)) {
+    return <SetList />
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -73,17 +78,6 @@ export default function App() {
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
-      case 'event-planner': return (
-        <EventPlanner
-          onPrint={(id) => { setPrintEventId(id); setPage('print-event') }}
-        />
-      )
-      case 'print-event': return (
-        <PrintEventPlan
-          proposalId={printEventId}
-          onBack={() => setPage('event-planner')}
-        />
-      )
       default: return <Dashboard navigate={setPage} />
     }
   }

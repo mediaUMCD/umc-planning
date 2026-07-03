@@ -1,19 +1,19 @@
 import { supabase } from '../lib/supabase.js'
 
 const NAV_ITEMS = [
-  { id: 'dashboard',        icon: '/icons/icon-dashboard.png',        label: 'Dashboard' },
-  { id: 'planner',          icon: '/icons/icon-service-planner.png',  label: 'Service Planner' },
-  { id: 'event-planner',    icon: '/icons/icon-event-planner.png',    label: 'Event Planner' },
-  { id: 'hymns',            icon: '/icons/icon-hymns.png',     label: 'Hymn Tracker' },
-  { id: 'uploads',          icon: '/icons/icon-worship-guide.png',   label: 'Upload Tracker' },
-  { id: 'import',           icon: '/icons/icon-bulletins.png',  label: 'Bulletin Import' },
-  { id: 'bulletin-settings',icon: '/icons/icon-bulletins.png',  label: 'Bulletin Settings' },
+  { id: 'dashboard', icon: '/icons/icon-dashboard.png', label: 'Dashboard' },
+  { id: 'planner', icon: '/icons/icon-service-planner.png', label: 'Service Planner' },
+  { id: 'hymns', icon: '/icons/icon-hymn-tracker.png', label: 'Hymn Tracker' },
+  { id: 'uploads', icon: '/icons/icon-upload-tracker.png', label: 'Upload Tracker' },
+  { id: 'import', icon: '/icons/icon-bulletin-import.png', label: 'Bulletin Import' },
+  { id: 'bulletin-settings', icon: '/icons/icon-weekly-bulletin.png', label: 'Bulletin Settings' },
 ]
 
 const OTHER_APPS = [
-  { label: 'Church App',  href: 'https://app.umcdanielson.org',      icon: '/icons/icon-home.png',    useImg: true },
-  { label: 'One Board',   href: 'https://board.umcdanielson.org',     icon: '/icons/icon-board.png',   useImg: true },
-  { label: 'Website',     href: 'https://umcdanielson.org',           icon: '/icons/icon-events.png',  useImg: true },
+  { label: 'Church App',  href: 'https://app.umcdanielson.org',      icon: '📱' },
+  { label: 'One Board',   href: 'https://board.umcdanielson.org',     icon: '📋' },
+  { label: 'Website',     href: 'https://umcdanielson.org',           icon: '🌐' },
+  { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
 
 export default function Sidebar({ page, navigate, session }) {
@@ -83,7 +83,7 @@ export default function Sidebar({ page, navigate, session }) {
             onMouseEnter={e => e.currentTarget.style.color = 'white'}
             onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.55)'}
           >
-            {app.useImg ? <img src={app.icon} alt="" style={{ width: 18, height: 18, flexShrink: 0 }} /> : <span style={{ fontSize: '15px' }}>{app.icon}</span>}
+            <span style={{ fontSize: '15px' }}>{app.icon}</span>
             {app.label}
           </a>
         ))}

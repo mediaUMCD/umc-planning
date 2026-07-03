@@ -134,9 +134,30 @@ export default function UploadTracker() {
                   >
                     <div style={{ width: '4px', height: '40px', borderRadius: '2px', background: seasonStyle.color, flexShrink: 0 }} />
 
-                    <div style={{ minWidth: '200px' }}>
+                    <div style={{ minWidth: '220px' }}>
                       <div style={{ fontWeight: 700, fontSize: '14px' }}>{formatDate(svc.service_date)}</div>
                       {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
+                    </div>
+
+                    <div style={{ minWidth: '240px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      {svc.spark_title && (
+                        <div style={{ fontSize: '12px', color: 'var(--gray-800)' }} title="Sunday Spark title">
+                          ✨ {svc.spark_title}
+                        </div>
+                      )}
+                      {svc.kids_story_teller && (
+                        <div style={{ fontSize: '12px', color: 'var(--gray-400)' }} title="Children's story teller">
+                          👦 {svc.kids_story_teller}
+                        </div>
+                      )}
+                      {svc.special_music_title && (
+                        <div style={{ fontSize: '12px', color: 'var(--gray-400)' }} title="Special music">
+                          🎵 {svc.special_music_title}{svc.special_music_person ? ` — ${svc.special_music_person}` : ''}
+                        </div>
+                      )}
+                      {!svc.spark_title && !svc.kids_story_teller && !svc.special_music_title && (
+                        <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontStyle: 'italic' }}>No details entered yet</div>
+                      )}
                     </div>
 
                     <div style={{ flex: 1 }}>
@@ -193,33 +214,32 @@ export default function UploadTracker() {
                                 )}
                               </div>
 
-                              {!isPodcast && (
-                                <div>
-                                  {editingUrl === tracker.id ? (
-                                    <div style={{ display: 'flex', gap: '6px' }}>
-                                      <input type="url" value={urlValue} onChange={e => setUrlValue(e.target.value)}
-                                        placeholder="https://youtube.com/..." style={{ fontSize: '12px', padding: '4px 8px', flex: 1 }} />
-                                      <button className="btn btn-primary btn-sm" onClick={() => saveUrl(tracker.id)}>Save</button>
-                                      <button className="btn btn-secondary btn-sm" onClick={() => { setEditingUrl(null); setUrlValue('') }}>✕</button>
-                                    </div>
-                                  ) : (
-                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                      {tracker.url ? (
-                                        <a href={tracker.url} target="_blank" rel="noreferrer"
-                                          style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                                          ▶ View on YouTube
-                                        </a>
-                                      ) : (
-                                        <span style={{ fontSize: '12px', color: 'var(--gray-400)', flex: 1 }}>No URL</span>
-                                      )}
-                                      <button className="btn btn-secondary btn-sm"
-                                        onClick={() => { setEditingUrl(tracker.id); setUrlValue(tracker.url || '') }}>
-                                        {tracker.url ? 'Edit' : '+ URL'}
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                              <div>
+                                {editingUrl === tracker.id ? (
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <input type="url" value={urlValue} onChange={e => setUrlValue(e.target.value)}
+                                      placeholder={isPodcast ? 'https://yourshow.rss.com/episode-...' : 'https://youtube.com/...'}
+                                      style={{ fontSize: '12px', padding: '4px 8px', flex: 1 }} />
+                                    <button className="btn btn-primary btn-sm" onClick={() => saveUrl(tracker.id)}>Save</button>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => { setEditingUrl(null); setUrlValue('') }}>✕</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    {tracker.url ? (
+                                      <a href={tracker.url} target="_blank" rel="noreferrer"
+                                        style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                        {isPodcast ? '🎧 View Episode' : '▶ View on YouTube'}
+                                      </a>
+                                    ) : (
+                                      <span style={{ fontSize: '12px', color: 'var(--gray-400)', flex: 1 }}>No URL</span>
+                                    )}
+                                    <button className="btn btn-secondary btn-sm"
+                                      onClick={() => { setEditingUrl(tracker.id); setUrlValue(tracker.url || '') }}>
+                                      {tracker.url ? 'Edit' : '+ URL'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )
                         })}
