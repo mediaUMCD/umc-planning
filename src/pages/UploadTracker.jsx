@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase.js'
+import { getSundayNumber } from '../lib/sundayNumber.js'
 
 const UPLOAD_TYPES = [
   { key: 'service', label: 'Full Service', icon: '📹' },
@@ -176,6 +177,7 @@ export default function UploadTracker() {
     const rows = services.map(svc => {
       const row = {
         'Date': svc.service_date,
+        'Sunday # (reference only)': getSundayNumber(svc.service_date),
         'Season (reference only)': svc.season || '',
         'Spark Title (reference only)': svc.spark_title || '',
       }
@@ -342,7 +344,9 @@ export default function UploadTracker() {
 
                     <div style={{ minWidth: '220px' }}>
                       <div style={{ fontWeight: 700, fontSize: '14px' }}>{formatDate(svc.service_date)}</div>
-                      {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
+                      <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                        {svc.season ? `${svc.season} · ` : ''}Sunday #{getSundayNumber(svc.service_date)}
+                      </div>
                     </div>
 
                     <div style={{ minWidth: '240px', display: 'flex', flexDirection: 'column', gap: '2px' }}>

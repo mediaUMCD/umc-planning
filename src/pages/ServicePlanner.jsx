@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
+import { getSundayNumber } from '../lib/sundayNumber.js'
 
 const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
@@ -428,6 +429,11 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
               <div className="form-group">
                 <label className="form-label">Service Date *</label>
                 <input type="date" value={form.service_date} onChange={e => handleDateChange(e.target.value)} />
+                {form.service_date && (
+                  <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>
+                    Sunday #{getSundayNumber(form.service_date)} of {new Date(form.service_date + 'T12:00:00').getFullYear()}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Season</label>
@@ -773,7 +779,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                     <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--burgundy)', textDecoration: 'underline', textDecorationColor: 'rgba(61,0,38,0.3)' }}>
                       {formatDate(svc.service_date)}
                     </div>
-                    {svc.season && <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>{svc.season}</div>}
+                    <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                      {svc.season ? `${svc.season} · ` : ''}Sunday #{getSundayNumber(svc.service_date)}
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
