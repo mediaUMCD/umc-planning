@@ -4,7 +4,7 @@ import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 
 const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
-const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'NIV', 'NRSV', 'KJV', 'MSG', 'NLT', 'ESV']
+const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'KJV', 'MSG', 'RSV', 'OTHER']
 const SERVICE_TYPES = ['Regular Sunday', 'Communion Sunday', 'Advent', 'Christmas Eve', 'Ash Wednesday', 'Maundy Thursday', 'Good Friday', 'Easter', 'Pentecost', 'Rally Day', 'Lessons & Carols', 'Special Service']
 const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900])
 
@@ -477,7 +477,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
               <h2 style={sectionHead}>👥 Kids Story & Liturgist</h2>
               <div className="form-group">
                 <label className="form-label">Story Teller</label>
-                <select value={form.kids_story_teller} onChange={e => setForm(f => ({ ...f, kids_story_teller: e.target.value }))}>
+                <select value={form.kids_story_teller} onChange={e => setForm(f => ({ ...f, kids_story_teller: e.target.value, children_message_person: e.target.value }))}>
                   <option value="">Select…</option>
                   {STORYTELLERS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -528,7 +528,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                   </select>
                 </div>
                 <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Children's Message By</label>
+                  <label className="form-label">Children's Message By <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(auto-fills from Story Teller — edit if different)</span></label>
                   <input type="text" value={form.children_message_person} onChange={e => setForm(f => ({ ...f, children_message_person: e.target.value }))} placeholder="e.g. Chrissy Pagano" />
                 </div>
               </div>
