@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js'
 
 const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900])
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids']
+const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'KJV', 'MSG', 'RSV', 'OTHER']
 
 const BOOK_NAMES = `Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|(?:1|2)\\s*Samuel|(?:1|2)\\s*Kings|(?:1|2)\\s*Chronicles|Ezra|Nehemiah|Esther|Job|Psalms?|Proverbs|Ecclesiastes|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|(?:1|2)\\s*Corinthians|Galatians|Ephesians|Philippians|Colossians|(?:1|2)\\s*Thessalonians|(?:1|2)\\s*Timothy|Titus|Philemon|Hebrews|James|(?:1|2|3)\\s*(?:Peter|John)|Jude|Revelation`
 
@@ -149,7 +150,7 @@ function extractData(pages) {
 
       seenNums.add(number)
       // Push in bulletin order — page1Lines is already sorted top-to-bottom
-      result.hymns.push({ hymnal: m[1].toUpperCase(), number, title })
+      result.hymns.push({ hymnal: m[1].toUpperCase(), number: String(number), title, is_closing: false })
     }
   }
 
@@ -177,7 +178,7 @@ for (const line of searchLines) {
     const ref = `${m[1]} ${verses}`.trim()
     if (!seenRefs.has(ref) && ref.length > 3 && /\d/.test(ref)) {
       const version = line.includes('NRSVue') ? 'NRSVue' : line.includes('NRSV') ? 'NRSV' : 'CEB'
-      result.scriptures.push({ reference: ref, bible_version: version, is_call_and_response: false })
+      result.scriptures.push({ reference: ref, bible_version: version, is_call_and_response: false, page_reference: '', is_gospel: false })
       seenRefs.add(ref)
     }
   }
@@ -186,7 +187,7 @@ for (const line of searchLines) {
     const raw = psalmM[1].trim()
     const ref = raw.toLowerCase().startsWith('psalm') ? raw : `Psalm ${raw}`
     if (!seenRefs.has(ref)) {
-      result.scriptures.push({ reference: ref, bible_version: 'CEB', is_call_and_response: false })
+      result.scriptures.push({ reference: ref, bible_version: 'CEB', is_call_and_response: false, page_reference: '', is_gospel: false })
       seenRefs.add(ref)
     }
   }
@@ -272,6 +273,36 @@ export default function BulletinImport() {
       return { ...r, data: { ...r.data, hymns: r.data.hymns.map((h, j) => j === hi ? { ...h, [field]: value } : h) } }
     }))
 
+  const addHymn = (idx) =>
+    setResults(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      return { ...r, data: { ...r.data, hymns: [...r.data.hymns, { hymnal: 'UMH', number: '', title: '', is_closing: false }] } }
+    }))
+
+  const removeHymn = (idx, hi) =>
+    setResults(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      return { ...r, data: { ...r.data, hymns: r.data.hymns.filter((_, j) => j !== hi) } }
+    }))
+
+  const updateScripture = (idx, si, field, value) =>
+    setResults(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      return { ...r, data: { ...r.data, scriptures: r.data.scriptures.map((s, j) => j === si ? { ...s, [field]: value } : s) } }
+    }))
+
+  const addScripture = (idx) =>
+    setResults(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      return { ...r, data: { ...r.data, scriptures: [...r.data.scriptures, { reference: '', bible_version: 'CEB', is_call_and_response: false, page_reference: '', is_gospel: false }] } }
+    }))
+
+  const removeScripture = (idx, si) =>
+    setResults(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      return { ...r, data: { ...r.data, scriptures: r.data.scriptures.filter((_, j) => j !== si) } }
+    }))
+
   const removeResult = (idx) => setResults(prev => prev.filter((_, i) => i !== idx))
 
   const saveAll = async () => {
@@ -315,7 +346,7 @@ export default function BulletinImport() {
         const validHymns = result.data.hymns.filter(h => h.number && !PAGE_REFS.has(parseInt(h.number)))
         if (validHymns.length > 0) {
           await supabase.from('service_hymns').insert(
-            validHymns.map((h, j) => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: j + 1 }))
+            validHymns.map((h, j) => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: j + 1, is_closing: h.is_closing || false }))
           )
         }
 
@@ -324,7 +355,11 @@ export default function BulletinImport() {
         const validScriptures = result.data.scriptures.filter(s => s.reference)
         if (validScriptures.length > 0) {
           await supabase.from('service_scriptures').insert(
-            validScriptures.map((s, j) => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: j + 1 }))
+            validScriptures.map((s, j) => ({
+              service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version,
+              is_call_and_response: s.is_call_and_response, sort_order: j + 1,
+              page_reference: s.page_reference || null, is_gospel: s.is_gospel || false,
+            }))
           )
         }
 
@@ -423,23 +458,55 @@ export default function BulletinImport() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div>
-                    <label className="form-label">Hymns ({result.data.hymns.length})</label>
-                    {result.data.hymns.length === 0 && <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>None found</div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label className="form-label" style={{ margin: 0 }}>Hymns ({result.data.hymns.length})</label>
+                      <button className="btn btn-secondary btn-sm" onClick={() => addHymn(idx)}>+ Add Hymn</button>
+                    </div>
+                    {result.data.hymns.length === 0 && <div style={{ fontSize: '13px', color: 'var(--gray-400)', marginBottom: '6px' }}>None found — add manually if needed</div>}
                     {result.data.hymns.map((h, hi) => (
-                      <div key={hi} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, background: h.hymnal === 'UMH' ? 'var(--burgundy-light)' : '#e3f2fd', color: h.hymnal === 'UMH' ? 'var(--burgundy)' : '#1565c0', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>{h.hymnal}</span>
-                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-600)', minWidth: '36px' }}>#{h.number}</span>
-                        <input type="text" value={h.title} onChange={e => updateHymn(idx, hi, 'title', e.target.value)} style={{ padding: '4px 8px', fontSize: '12px', flex: 1 }} />
+                      <div key={hi} style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '4px' }}>
+                          <select value={h.hymnal} onChange={e => updateHymn(idx, hi, 'hymnal', e.target.value)} style={{ padding: '4px 6px', fontSize: '12px', width: '72px', flexShrink: 0 }}>
+                            <option value="UMH">UMH</option>
+                            <option value="TFWS">TFWS</option>
+                          </select>
+                          <input type="text" value={h.number} onChange={e => updateHymn(idx, hi, 'number', e.target.value)} placeholder="###" style={{ padding: '4px 6px', fontSize: '12px', width: '60px', flexShrink: 0 }} />
+                          <input type="text" value={h.title} onChange={e => updateHymn(idx, hi, 'title', e.target.value)} placeholder="Title" style={{ padding: '4px 8px', fontSize: '12px', flex: 1 }} />
+                          <button onClick={() => removeHymn(idx, hi)} style={{ fontSize: '11px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                        </div>
+                        <label className="checkbox-label" style={{ fontSize: '11px' }}>
+                          <input type="checkbox" checked={h.is_closing || false} onChange={e => updateHymn(idx, hi, 'is_closing', e.target.checked)} />
+                          Closing hymn
+                        </label>
                       </div>
                     ))}
                   </div>
                   <div>
-                    <label className="form-label">Scriptures ({result.data.scriptures.length})</label>
-                    {result.data.scriptures.length === 0 && <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>None found</div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label className="form-label" style={{ margin: 0 }}>Scriptures ({result.data.scriptures.length})</label>
+                      <button className="btn btn-secondary btn-sm" onClick={() => addScripture(idx)}>+ Add</button>
+                    </div>
+                    {result.data.scriptures.length === 0 && <div style={{ fontSize: '13px', color: 'var(--gray-400)', marginBottom: '6px' }}>None found — add manually if needed</div>}
                     {result.data.scriptures.map((s, si) => (
-                      <div key={si} style={{ display: 'flex', gap: '6px', marginBottom: '4px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--gray-400)', minWidth: '55px' }}>{s.bible_version}</span>
-                        <span style={{ fontSize: '13px', color: 'var(--gray-800)' }}>{s.reference}</span>
+                      <div key={si} style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '4px' }}>
+                          <input type="text" value={s.reference} onChange={e => updateScripture(idx, si, 'reference', e.target.value)} placeholder="e.g. John 3:16" style={{ padding: '4px 8px', fontSize: '12px', flex: 1 }} />
+                          <select value={s.bible_version} onChange={e => updateScripture(idx, si, 'bible_version', e.target.value)} style={{ padding: '4px 6px', fontSize: '12px', width: '80px', flexShrink: 0 }}>
+                            {BIBLE_VERSIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                          <input type="text" value={s.page_reference || ''} onChange={e => updateScripture(idx, si, 'page_reference', e.target.value)} placeholder="Page(s)" style={{ padding: '4px 6px', fontSize: '12px', width: '70px', flexShrink: 0 }} />
+                          <button onClick={() => removeScripture(idx, si)} style={{ fontSize: '11px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}>✕</button>
+                        </div>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                          <label className="checkbox-label" style={{ fontSize: '11px' }}>
+                            <input type="checkbox" checked={s.is_call_and_response || false} onChange={e => updateScripture(idx, si, 'is_call_and_response', e.target.checked)} />
+                            Call & Response
+                          </label>
+                          <label className="checkbox-label" style={{ fontSize: '11px' }}>
+                            <input type="checkbox" checked={s.is_gospel || false} onChange={e => updateScripture(idx, si, 'is_gospel', e.target.checked)} />
+                            Gospel Lesson
+                          </label>
+                        </div>
                       </div>
                     ))}
                   </div>
