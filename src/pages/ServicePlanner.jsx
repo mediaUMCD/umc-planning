@@ -145,6 +145,147 @@ function buildBibleGatewayUrl(reference, version) {
   return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${encodeURIComponent(version || 'CEB')}`
 }
 
+function truncate(text, n) {
+  if (!text) return ''
+  return text.length > n ? text.slice(0, n).trim() + '…' : text
+}
+
+// Resolves what each row's Content / Page-Person columns should show and how they behave.
+// mode: 'readonly' (display only) | 'direct' (writes straight to a form field, no source
+// conflict since nothing else edits it) | 'override' (no source card at all — welcome/
+// benediction text) | 'ask' (a source card exists — Hymns/Scripture/Sunday Spark — so a
+// diverging edit needs a choice) | 'custom' / 'customPage' (free rows) | 'none' (blank cell).
+function resolveRow(row, form, serviceHymns, serviceScriptures) {
+  const occ = row.occurrence || 0
+  switch (row.type) {
+    case 'welcome':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Welcome & Announcements', placeholder: 'Welcome & Announcements' },
+        col3: { mode: 'none' },
+      }
+    case 'call_to_worship':
+      return {
+        col2: { mode: 'readonly', value: form.call_to_worship_text ? truncate(form.call_to_worship_text, 60) : '(not entered above)' },
+        col3: { mode: 'direct', field: 'liturgist', value: form.liturgist, placeholder: 'Liturgist' },
+      }
+    case 'hymn': {
+      const nonClosing = serviceHymns.filter(h => !h.is_closing)
+      const h = nonClosing[occ]
+      return {
+        col2: { mode: 'ask', value: row.contentOverride ?? (h ? h.title : ''), sourceValue: h ? h.title : '', placeholder: h ? '' : '(no hymn entered above)' },
+        col3: { mode: 'readonly', value: h ? `${h.hymnal} #${h.number}` : '' },
+      }
+    }
+    case 'closing_hymn': {
+      const closing = serviceHymns.filter(h => h.is_closing)
+      const h = closing[occ]
+      return {
+        col2: { mode: 'ask', value: row.contentOverride ?? (h ? h.title : ''), sourceValue: h ? h.title : '', placeholder: h ? '' : '(mark a hymn "Closing hymn" above)' },
+        col3: { mode: 'readonly', value: h ? `${h.hymnal} #${h.number}` : '' },
+      }
+    }
+    case 'scripture': {
+      const s = serviceScriptures[occ]
+      return {
+        col2: { mode: 'ask', value: row.contentOverride ?? (s ? s.reference : ''), sourceValue: s ? s.reference : '', placeholder: s ? '' : '(no scripture entered above)' },
+        col3: { mode: 'readonly', value: s ? `${s.bible_version}${s.page_reference ? ' · p.' + s.page_reference : ''}` : '' },
+      }
+    }
+    case 'childrens_message':
+      return {
+        col2: { mode: 'readonly', value: form.children_message_label || "CHILDREN'S MESSAGE" },
+        col3: { mode: 'readonly', value: form.children_message_person || form.kids_story_teller || '' },
+      }
+    case 'special_music':
+      return {
+        col2: { mode: 'direct', field: 'special_music_title', value: form.special_music_title, placeholder: 'Title' },
+        col3: { mode: 'direct', field: 'special_music_person', value: form.special_music_person, placeholder: 'Performed by' },
+      }
+    case 'sermon':
+      return {
+        col2: { mode: 'ask', value: row.contentOverride ?? form.spark_title, sourceValue: form.spark_title, placeholder: '(no Spark title entered above)' },
+        col3: { mode: 'direct', field: 'spark_preacher', value: form.spark_preacher, placeholder: '' },
+      }
+    case 'apostles_creed':
+      return {
+        col2: { mode: 'direct', field: 'apostles_creed_ref', value: form.apostles_creed_ref, placeholder: 'UMH #881' },
+        col3: { mode: 'none' },
+      }
+    case 'pastoral_prayer':
+      return {
+        col2: { mode: 'readonly', value: 'Joys & Concerns / Pastoral Prayer' },
+        col3: { mode: 'direct', field: 'pastoral_prayer_person', value: form.pastoral_prayer_person, placeholder: 'Led by' },
+      }
+    case 'lords_prayer':
+      return {
+        col2: { mode: 'readonly', value: "The Lord's Prayer" },
+        col3: { mode: 'direct', field: 'lords_prayer_leader', value: form.lords_prayer_leader, placeholder: 'Led by' },
+      }
+    case 'offertory_prayer':
+      return {
+        col2: { mode: 'readonly', value: form.offertory_prayer_text ? truncate(form.offertory_prayer_text, 60) : '(not entered above)' },
+        col3: { mode: 'direct', field: 'offering_prayer_source', value: form.offering_prayer_source, placeholder: 'Source' },
+      }
+    case 'doxology':
+      return {
+        col2: { mode: 'direct', field: 'doxology_ref', value: form.doxology_ref, placeholder: 'UMH #95' },
+        col3: { mode: 'none' },
+      }
+    case 'announcements':
+      return {
+        col2: { mode: 'readonly', value: 'Weekly Announcements' },
+        col3: { mode: 'direct', field: 'announcements_reader', value: form.announcements_reader, placeholder: 'Read by' },
+      }
+    case 'benediction':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Benediction', placeholder: 'Benediction' },
+        col3: { mode: 'none' },
+      }
+    case 'custom':
+      return {
+        col2: { mode: 'custom', value: row.customContent || '', placeholder: 'Content' },
+        col3: { mode: 'customPage', value: row.customPage || '', placeholder: 'Page / person' },
+      }
+    default:
+      return { col2: { mode: 'none' }, col3: { mode: 'none' } }
+  }
+}
+
+// Content cell for hymn/scripture/sermon rows: a source card exists elsewhere, so a
+// diverging edit asks whether it's a one-off for this row or should update that card too.
+function AskCell({ value, sourceValue, placeholder, onOverride, onUpdateSource }) {
+  const [local, setLocal] = useState(value || '')
+  const [pending, setPending] = useState(null)
+
+  useEffect(() => { setLocal(value || '') }, [value])
+
+  function handleBlur() {
+    if (local === (sourceValue || '')) { setPending(null); return }
+    if (local === (value || '')) return
+    setPending(local)
+  }
+
+  return (
+    <div>
+      <input type="text" value={local} onChange={e => setLocal(e.target.value)} onBlur={handleBlur}
+        placeholder={placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+      {pending !== null && (
+        <div style={{ display: 'flex', gap: '8px', marginTop: '4px', fontSize: '11px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ color: 'var(--gray-400)' }}>Differs from the card above —</span>
+          <button type="button" onClick={() => { onOverride(pending); setPending(null) }}
+            style={{ fontSize: '11px', color: 'var(--burgundy)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
+            just this row
+          </button>
+          <button type="button" onClick={() => { onUpdateSource(pending); setPending(null) }}
+            style={{ fontSize: '11px', color: 'var(--burgundy)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
+            update source too
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const sectionHead = {
   fontSize: '14px', fontWeight: 700, color: 'var(--burgundy)',
   marginBottom: '14px', paddingBottom: '8px', borderBottom: '1px solid var(--gray-100)',
@@ -166,9 +307,60 @@ const EMPTY_FORM = {
   bulletin_orientation: 'landscape',
   special_designation: '', service_time: '10:15 a.m.',
   back_cover_photo_url: '',
+  bulletin_order: null,
 }
 
 const CHILDREN_MESSAGE_LABELS = ["CHILDREN'S MESSAGE", 'CELEBRATING OUR CHILDREN']
+
+// ── Bulletin Order Builder ──
+// Row types that pull from another card (Hymns, Scripture, Kids Story, Sunday Spark).
+// "hymn"/"closing_hymn"/"scripture"/"sermon" support the ask-on-edit dialog since editing
+// them here could diverge from the source card. Everything else either has no other home
+// (special music, creed, doxology, prayer leaders, announcements reader — these write
+// straight to the form) or is a read-only preview of a full-text card kept elsewhere.
+const ROW_TYPES = [
+  { key: 'welcome', label: 'Welcome' },
+  { key: 'call_to_worship', label: 'Call to worship' },
+  { key: 'hymn', label: 'Hymn' },
+  { key: 'scripture', label: 'Scripture reading' },
+  { key: 'childrens_message', label: "Children's message" },
+  { key: 'special_music', label: 'Special music' },
+  { key: 'sermon', label: 'Sermon' },
+  { key: 'apostles_creed', label: "Apostles' creed" },
+  { key: 'pastoral_prayer', label: 'Pastoral prayer' },
+  { key: 'lords_prayer', label: "Lord's prayer" },
+  { key: 'offertory_prayer', label: 'Offertory prayer' },
+  { key: 'doxology', label: 'Doxology' },
+  { key: 'announcements', label: 'Announcements' },
+  { key: 'closing_hymn', label: 'Closing hymn' },
+  { key: 'benediction', label: 'Benediction' },
+  { key: 'custom', label: 'Custom' },
+]
+const ROW_TYPE_LABELS = Object.fromEntries(ROW_TYPES.map(t => [t.key, t.label]))
+
+const DEFAULT_ORDER_TYPES = [
+  'welcome', 'call_to_worship', 'hymn', 'scripture', 'childrens_message',
+  'special_music', 'sermon', 'apostles_creed', 'pastoral_prayer', 'lords_prayer',
+  'offertory_prayer', 'doxology', 'announcements', 'closing_hymn', 'benediction',
+]
+
+let rowIdCounter = 0
+function newRowId() { rowIdCounter += 1; return `row_${Date.now()}_${rowIdCounter}` }
+
+function buildDefaultOrder() {
+  return DEFAULT_ORDER_TYPES.map(type => ({ id: newRowId(), type, contentOverride: null }))
+}
+
+// Adds an occurrence index to each row (0-based count of same-type rows seen so far),
+// used to pick which underlying hymn/scripture entry a "hymn"/"scripture" row refers to.
+function withOccurrence(order) {
+  const counters = {}
+  return order.map(row => {
+    const occurrence = counters[row.type] || 0
+    counters[row.type] = occurrence + 1
+    return { ...row, occurrence }
+  })
+}
 
 export default function ServicePlanner({ onViewService, editServiceId, onClearEditId }) {
   const [view, setView] = useState('list')
@@ -286,8 +478,55 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
   function updateHymn(idx, field, value) { setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, [field]: value } : h)) }
 
+  // ── Order builder row management ──
+  function addOrderRow(type) {
+    setForm(f => ({ ...f, bulletin_order: [...(f.bulletin_order || []), { id: newRowId(), type, contentOverride: null, customLabel: '', customContent: '', customPage: '' }] }))
+  }
+  function removeOrderRow(id) {
+    setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).filter(r => r.id !== id) }))
+  }
+  function moveOrderRow(id, dir) {
+    setForm(f => {
+      const order = [...(f.bulletin_order || [])]
+      const idx = order.findIndex(r => r.id === id)
+      const swapWith = idx + dir
+      if (idx < 0 || swapWith < 0 || swapWith >= order.length) return f
+      ;[order[idx], order[swapWith]] = [order[swapWith], order[idx]]
+      return { ...f, bulletin_order: order }
+    })
+  }
+  function changeOrderRowType(id, type) {
+    setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).map(r => r.id === id ? { id: r.id, type, contentOverride: null, customLabel: '', customContent: '', customPage: '' } : r) }))
+  }
+  function setOrderRowOverride(id, value) {
+    setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).map(r => r.id === id ? { ...r, contentOverride: value } : r) }))
+  }
+  function clearOrderRowOverride(id) {
+    setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).map(r => r.id === id ? { ...r, contentOverride: null } : r) }))
+  }
+  function setOrderRowCustomField(id, field, value) {
+    setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).map(r => r.id === id ? { ...r, [field]: value } : r) }))
+  }
+
+  // Writes an edited hymn/scripture/sermon title back to its source card.
+  function updateSourceForRow(row, occurrence, value) {
+    if (row.type === 'hymn') {
+      const nonClosing = serviceHymns.map((h, i) => ({ h, i })).filter(x => !x.h.is_closing)
+      const target = nonClosing[occurrence]
+      if (target) updateHymn(target.i, 'title', value)
+    } else if (row.type === 'closing_hymn') {
+      const closing = serviceHymns.map((h, i) => ({ h, i })).filter(x => x.h.is_closing)
+      const target = closing[occurrence]
+      if (target) updateHymn(target.i, 'title', value)
+    } else if (row.type === 'scripture') {
+      if (serviceScriptures[occurrence]) updateScripture(occurrence, 'reference', value)
+    } else if (row.type === 'sermon') {
+      setForm(f => ({ ...f, spark_title: value }))
+    }
+  }
+
   function startNew() {
-    setForm(EMPTY_FORM)
+    setForm({ ...EMPTY_FORM, bulletin_order: buildDefaultOrder() })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
     setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
     setEditingService(null); setView('edit'); setSaveStatus(null)
@@ -327,6 +566,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       special_designation: svc.special_designation || '',
       service_time: svc.service_time || '10:15 a.m.',
       back_cover_photo_url: svc.back_cover_photo_url || '',
+      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildDefaultOrder(),
     })
     setServiceHymns(
       svc.service_hymns?.length
@@ -498,6 +738,18 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                   <input type="text" value={form.next_week_liturgist} onChange={e => setForm(f => ({ ...f, next_week_liturgist: e.target.value }))} placeholder="e.g. Scott Richards" />
                 </div>
               </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Children's Message Label</label>
+                  <select value={form.children_message_label} onChange={e => setForm(f => ({ ...f, children_message_label: e.target.value }))}>
+                    {CHILDREN_MESSAGE_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Children's Message By <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(auto-fills from Story Teller — edit if different)</span></label>
+                  <input type="text" value={form.children_message_person} onChange={e => setForm(f => ({ ...f, children_message_person: e.target.value }))} placeholder="e.g. Chrissy Pagano" />
+                </div>
+              </div>
             </div>
 
             <div className="card">
@@ -521,54 +773,6 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Source Citation</label>
                 <input type="text" value={form.offering_prayer_source} onChange={e => setForm(f => ({ ...f, offering_prayer_source: e.target.value }))} placeholder="e.g. Offering Prayer from umcdiscipleship.org" />
-              </div>
-            </div>
-
-            <div className="card">
-              <h2 style={sectionHead}>📋 Order of Service — Other Fields</h2>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Children's Message Label</label>
-                  <select value={form.children_message_label} onChange={e => setForm(f => ({ ...f, children_message_label: e.target.value }))}>
-                    {CHILDREN_MESSAGE_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Children's Message By <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(auto-fills from Story Teller — edit if different)</span></label>
-                  <input type="text" value={form.children_message_person} onChange={e => setForm(f => ({ ...f, children_message_person: e.target.value }))} placeholder="e.g. Chrissy Pagano" />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Special Music Title</label>
-                <input type="text" value={form.special_music_title} onChange={e => setForm(f => ({ ...f, special_music_title: e.target.value }))} placeholder="e.g. Great Is Thy Faithfulness" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Special Music Performed By</label>
-                <input type="text" value={form.special_music_person} onChange={e => setForm(f => ({ ...f, special_music_person: e.target.value }))} placeholder="e.g. Pastor Zach" />
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Apostles' Creed</label>
-                  <input type="text" value={form.apostles_creed_ref} onChange={e => setForm(f => ({ ...f, apostles_creed_ref: e.target.value }))} placeholder="UMH #881 (leave blank to omit)" />
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Doxology</label>
-                  <input type="text" value={form.doxology_ref} onChange={e => setForm(f => ({ ...f, doxology_ref: e.target.value }))} placeholder="UMH #95" />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Joys & Concerns / Pastoral Prayer</label>
-                  <input type="text" value={form.pastoral_prayer_person} onChange={e => setForm(f => ({ ...f, pastoral_prayer_person: e.target.value }))} placeholder="e.g. Pastor Zach" />
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Lord's Prayer Led By</label>
-                  <input type="text" value={form.lords_prayer_leader} onChange={e => setForm(f => ({ ...f, lords_prayer_leader: e.target.value }))} placeholder="e.g. Youth" />
-                </div>
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Weekly Announcements Read By</label>
-                <input type="text" value={form.announcements_reader} onChange={e => setForm(f => ({ ...f, announcements_reader: e.target.value }))} placeholder="e.g. Betsy Kneeland" />
               </div>
             </div>
 
@@ -717,6 +921,94 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="page-body" style={{ paddingTop: 0 }}>
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h2 style={{ ...sectionHead, margin: 0, border: 'none', paddingBottom: 0 }}>📋 Bulletin Order Preview</h2>
+              <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>Mirrors what prints — reorder, add, or remove rows as needed</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', borderTop: '1px solid var(--gray-100)' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: '11px', color: 'var(--gray-400)', borderBottom: '1px solid var(--gray-100)' }}>Item</th>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: '11px', color: 'var(--gray-400)', borderBottom: '1px solid var(--gray-100)', borderLeft: '1px solid var(--gray-100)' }}>Content</th>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: '11px', color: 'var(--gray-400)', borderBottom: '1px solid var(--gray-100)', borderLeft: '1px solid var(--gray-100)' }}>Page / person</th>
+                  <th style={{ borderBottom: '1px solid var(--gray-100)', borderLeft: '1px solid var(--gray-100)', width: '50px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {withOccurrence(form.bulletin_order || []).map((row, idx) => {
+                  const resolved = resolveRow(row, form, serviceHymns, serviceScriptures)
+                  const total = (form.bulletin_order || []).length
+                  return (
+                    <tr key={row.id} style={{ borderTop: '1px solid var(--gray-100)' }}>
+                      <td style={{ padding: '8px 10px', verticalAlign: 'top' }}>
+                        <select value={row.type} onChange={e => changeOrderRowType(row.id, e.target.value)} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }}>
+                          {ROW_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                        </select>
+                        {row.type === 'custom' && (
+                          <input type="text" value={row.customLabel || ''} onChange={e => setOrderRowCustomField(row.id, 'customLabel', e.target.value)}
+                            placeholder="Label" style={{ marginTop: '4px', padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                      </td>
+                      <td style={{ padding: '8px 10px', borderLeft: '1px solid var(--gray-100)', verticalAlign: 'top' }}>
+                        {resolved.col2.mode === 'readonly' && <span style={{ fontSize: '12px', color: 'var(--gray-600)' }}>{resolved.col2.value || '—'}</span>}
+                        {resolved.col2.mode === 'direct' && (
+                          <input type="text" value={resolved.col2.value || ''} onChange={e => setForm(f => ({ ...f, [resolved.col2.field]: e.target.value }))}
+                            placeholder={resolved.col2.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col2.mode === 'override' && (
+                          <input type="text" value={resolved.col2.value || ''} onChange={e => setOrderRowOverride(row.id, e.target.value)}
+                            placeholder={resolved.col2.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col2.mode === 'custom' && (
+                          <input type="text" value={row.customContent || ''} onChange={e => setOrderRowCustomField(row.id, 'customContent', e.target.value)}
+                            placeholder={resolved.col2.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col2.mode === 'ask' && (
+                          <AskCell
+                            value={resolved.col2.value}
+                            sourceValue={resolved.col2.sourceValue}
+                            placeholder={resolved.col2.placeholder}
+                            onOverride={val => setOrderRowOverride(row.id, val)}
+                            onUpdateSource={val => { updateSourceForRow(row, row.occurrence, val); clearOrderRowOverride(row.id) }}
+                          />
+                        )}
+                      </td>
+                      <td style={{ padding: '8px 10px', borderLeft: '1px solid var(--gray-100)', verticalAlign: 'top' }}>
+                        {resolved.col3.mode === 'readonly' && <span style={{ fontSize: '12px', color: 'var(--gray-600)' }}>{resolved.col3.value || '—'}</span>}
+                        {resolved.col3.mode === 'direct' && (
+                          <input type="text" value={resolved.col3.value || ''} onChange={e => setForm(f => ({ ...f, [resolved.col3.field]: e.target.value }))}
+                            placeholder={resolved.col3.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col3.mode === 'customPage' && (
+                          <input type="text" value={row.customPage || ''} onChange={e => setOrderRowCustomField(row.id, 'customPage', e.target.value)}
+                            placeholder={resolved.col3.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col3.mode === 'none' && <span style={{ fontSize: '12px', color: 'var(--gray-300)' }}>—</span>}
+                      </td>
+                      <td style={{ padding: '8px 6px', borderLeft: '1px solid var(--gray-100)', verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+                          <button type="button" onClick={() => moveOrderRow(row.id, -1)} disabled={idx === 0}
+                            style={{ fontSize: '11px', background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▲</button>
+                          <button type="button" onClick={() => moveOrderRow(row.id, 1)} disabled={idx === total - 1}
+                            style={{ fontSize: '11px', background: 'none', border: 'none', cursor: idx === total - 1 ? 'default' : 'pointer', color: idx === total - 1 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▼</button>
+                          <button type="button" onClick={() => removeOrderRow(row.id)}
+                            style={{ fontSize: '11px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)' }}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => addOrderRow('custom')}>+ Add Row</button>
+              <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>New rows default to "Custom" — change the dropdown to any type above</span>
             </div>
           </div>
         </div>

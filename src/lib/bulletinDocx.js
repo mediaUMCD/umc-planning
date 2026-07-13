@@ -59,6 +59,16 @@ function para(children, opts = {}) {
   })
 }
 
+// Welcome heading is always centered and larger than body text, regardless of layout.
+const WELCOME_SIZE = 28 // 14pt
+function welcomePara(text) {
+  return new Paragraph({
+    children: [run(text, { size: WELCOME_SIZE })],
+    alignment: AlignmentType.CENTER,
+    spacing: LINE_SPACING,
+  })
+}
+
 function blankLine() {
   return new Paragraph({ children: [], spacing: LINE_SPACING })
 }
@@ -94,10 +104,10 @@ function buildOrderOfServiceParagraphs(service, hymns, scriptures) {
   const isLandscape = service.bulletin_orientation !== 'portrait'
   const tabStops = isLandscape ? TAB_STOPS_LANDSCAPE : TAB_STOPS_PORTRAIT
 
-  // Welcome block
-  for (const line of WELCOME_PARAGRAPH_1.split('\n')) paragraphs.push(para(run(line)))
+  // Welcome block — always centered, larger than body text
+  for (const line of WELCOME_PARAGRAPH_1.split('\n')) paragraphs.push(welcomePara(line))
   paragraphs.push(blankLine())
-  for (const line of WELCOME_PARAGRAPH_2.split('\n')) paragraphs.push(para(run(line)))
+  for (const line of WELCOME_PARAGRAPH_2.split('\n')) paragraphs.push(welcomePara(line))
   paragraphs.push(blankLine())
 
   for (const item of items) {
