@@ -373,6 +373,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
+  const [generateHint, setGenerateHint] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
@@ -529,7 +530,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setForm({ ...EMPTY_FORM, bulletin_order: buildDefaultOrder() })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
     setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
-    setEditingService(null); setView('edit'); setSaveStatus(null)
+    setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
 
   function startEdit(svc, hymnsList = hymns) {
@@ -584,7 +585,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           }))
         : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }]
     )
-    setEditingService(svc); setView('edit'); setSaveStatus(null)
+    setEditingService(svc); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
 
   async function handleSave() {
@@ -753,35 +754,6 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
             </div>
 
             <div className="card">
-              <h2 style={sectionHead}>🙏 Call to Worship</h2>
-              <div className="form-group">
-                <label className="form-label">Full Text</label>
-                <textarea value={form.call_to_worship_text} onChange={e => setForm(f => ({ ...f, call_to_worship_text: e.target.value }))} placeholder="There is no one like you, God of Abraham and Sarah..." style={{ minHeight: '140px' }} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Source Citation</label>
-                <input type="text" value={form.call_to_worship_source} onChange={e => setForm(f => ({ ...f, call_to_worship_source: e.target.value }))} placeholder="e.g. Lectionary Worship Aids: Series VIII, Cycle A..." />
-              </div>
-            </div>
-
-            <div className="card">
-              <h2 style={sectionHead}>🕊️ Offertory Prayer</h2>
-              <div className="form-group">
-                <label className="form-label">Full Text</label>
-                <textarea value={form.offertory_prayer_text} onChange={e => setForm(f => ({ ...f, offertory_prayer_text: e.target.value }))} placeholder="Listening God, you hear the cries we whisper..." style={{ minHeight: '140px' }} />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Source Citation</label>
-                <input type="text" value={form.offering_prayer_source} onChange={e => setForm(f => ({ ...f, offering_prayer_source: e.target.value }))} placeholder="e.g. Offering Prayer from umcdiscipleship.org" />
-              </div>
-            </div>
-
-            <div className="card">
-              <h2 style={sectionHead}>📣 Announcements List <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(Page 2)</span></h2>
-              <textarea value={form.announcements_list} onChange={e => setForm(f => ({ ...f, announcements_list: e.target.value }))} placeholder={'One per line, e.g.:\nToday: Luncheon after Church – bring a side dish to share.\n6/27: Grief Group @ 10:15 a.m.'} style={{ minHeight: '100px' }} />
-            </div>
-
-            <div className="card">
               <h2 style={sectionHead}>🖨️ Bulletin Layout</h2>
               <div className="form-group">
                 <label className="form-label">Orientation</label>
@@ -814,19 +786,21 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                   <input type="text" value={form.service_time} onChange={e => setForm(f => ({ ...f, service_time: e.target.value }))} placeholder={form.special_designation ? 'Morning Service 10:15 a.m.' : '10:15 a.m.'} />
                 </div>
               </div>
-              {editingService && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-lg"
-                  style={{ width: '100%', marginTop: '4px' }}
-                  onClick={() => setShowGenerateModal(true)}
-                >
-                  📄 Generate Bulletin
-                </button>
-              )}
-              {!editingService && (
-                <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontStyle: 'italic', marginTop: '4px' }}>
-                  Save the service first to generate its bulletin.
+              <button
+                type="button"
+                className="btn btn-primary btn-lg"
+                style={{ width: '100%', marginTop: '4px' }}
+                onClick={() => {
+                  if (!editingService) { setGenerateHint(true); return }
+                  setGenerateHint(false)
+                  setShowGenerateModal(true)
+                }}
+              >
+                📄 Generate Bulletin
+              </button>
+              {generateHint && !editingService && (
+                <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '6px', fontWeight: 600 }}>
+                  ⚠️ Save the service first — then Generate Bulletin will work.
                 </div>
               )}
             </div>
@@ -921,6 +895,35 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🙏 Call to Worship</h2>
+              <div className="form-group">
+                <label className="form-label">Full Text</label>
+                <textarea value={form.call_to_worship_text} onChange={e => setForm(f => ({ ...f, call_to_worship_text: e.target.value }))} placeholder="There is no one like you, God of Abraham and Sarah..." style={{ minHeight: '140px' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Source Citation</label>
+                <input type="text" value={form.call_to_worship_source} onChange={e => setForm(f => ({ ...f, call_to_worship_source: e.target.value }))} placeholder="e.g. Lectionary Worship Aids: Series VIII, Cycle A..." />
+              </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🕊️ Offertory Prayer</h2>
+              <div className="form-group">
+                <label className="form-label">Full Text</label>
+                <textarea value={form.offertory_prayer_text} onChange={e => setForm(f => ({ ...f, offertory_prayer_text: e.target.value }))} placeholder="Listening God, you hear the cries we whisper..." style={{ minHeight: '140px' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Source Citation</label>
+                <input type="text" value={form.offering_prayer_source} onChange={e => setForm(f => ({ ...f, offering_prayer_source: e.target.value }))} placeholder="e.g. Offering Prayer from umcdiscipleship.org" />
+              </div>
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>📣 Announcements List <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(Page 2)</span></h2>
+              <textarea value={form.announcements_list} onChange={e => setForm(f => ({ ...f, announcements_list: e.target.value }))} placeholder={'One per line, e.g.:\nToday: Luncheon after Church – bring a side dish to share.\n6/27: Grief Group @ 10:15 a.m.'} style={{ minHeight: '100px' }} />
             </div>
           </div>
         </div>
