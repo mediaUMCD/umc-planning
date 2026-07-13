@@ -188,7 +188,13 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
       const s = serviceScriptures[occ]
       return {
         col2: { mode: 'ask', value: row.contentOverride ?? (s ? s.reference : ''), sourceValue: s ? s.reference : '', placeholder: s ? '' : '(no scripture entered above)' },
-        col3: { mode: 'readonly', value: s ? `${s.bible_version}${s.page_reference ? ' · p.' + s.page_reference : ''}` : '' },
+        col3: {
+          mode: 'scripture_reader',
+          value: s ? (s.reader || '') : '',
+          caption: s ? `${s.bible_version}${s.page_reference ? ' · p.' + s.page_reference : ''}` : '',
+          placeholder: 'Reader',
+          disabled: !s,
+        },
       }
     }
     case 'childrens_message':
@@ -423,7 +429,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
-  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
+  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
 
   useEffect(() => { 
     const init = async () => {
@@ -520,8 +526,26 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
   function addHymn() { setServiceHymns(prev => [...prev, { hymnal: 'UMH', number: '', title: '', sort_order: prev.length + 1, is_closing: false }]) }
   function removeHymn(idx) { setServiceHymns(prev => prev.filter((_, i) => i !== idx).map((h, i) => ({ ...h, sort_order: i + 1 }))) }
-  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1, page_reference: '', is_gospel: false }]) }
+  function moveHymn(idx, dir) {
+    setServiceHymns(prev => {
+      const swapWith = idx + dir
+      if (swapWith < 0 || swapWith >= prev.length) return prev
+      const arr = [...prev]
+      ;[arr[idx], arr[swapWith]] = [arr[swapWith], arr[idx]]
+      return arr.map((h, i) => ({ ...h, sort_order: i + 1 }))
+    })
+  }
+  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1, page_reference: '', is_gospel: false, reader: '' }]) }
   function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
+  function moveScripture(idx, dir) {
+    setServiceScriptures(prev => {
+      const swapWith = idx + dir
+      if (swapWith < 0 || swapWith >= prev.length) return prev
+      const arr = [...prev]
+      ;[arr[idx], arr[swapWith]] = [arr[swapWith], arr[idx]]
+      return arr.map((s, i) => ({ ...s, sort_order: i + 1 }))
+    })
+  }
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
   function updateHymn(idx, field, value) { setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, [field]: value } : h)) }
 
@@ -560,6 +584,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion) }))
   }
 
+  function updateScriptureReaderByOccurrence(occurrence, value) {
+    if (serviceScriptures[occurrence]) updateScripture(occurrence, 'reader', value)
+  }
+
   // Writes an edited hymn/scripture/sermon title back to its source card.
   function updateSourceForRow(row, occurrence, value) {
     if (row.type === 'hymn') {
@@ -580,7 +608,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   function startNew() {
     setForm({ ...EMPTY_FORM, bulletin_order: buildOrderForContext(EMPTY_FORM.service_type, EMPTY_FORM.is_communion) })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
-    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
+    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
     setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
 
@@ -632,9 +660,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     setServiceScriptures(
       svc.service_scriptures?.length
         ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order).map(s => ({
-            ...s, page_reference: s.page_reference || '', is_gospel: s.is_gospel || false,
+            ...s, page_reference: s.page_reference || '', is_gospel: s.is_gospel || false, reader: s.reader || '',
           }))
-        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }]
+        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }]
     )
     setEditingService(svc); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
@@ -668,7 +696,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       const validScriptures = serviceScriptures.filter(s => s.reference)
       if (validScriptures.length > 0) {
         await supabase.from('service_scriptures').insert(
-          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false }))
+          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false, reader: s.reader || null }))
         )
       }
       setSaveStatus('success'); loadServices()
@@ -872,7 +900,15 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                 <div key={idx} style={{ border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-400)' }}>HYMN {idx + 1}</span>
-                    {serviceHymns.length > 1 && <button onClick={() => removeHymn(idx)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>}
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '2px' }}>
+                        <button type="button" onClick={() => moveHymn(idx, -1)} disabled={idx === 0}
+                          style={{ fontSize: '12px', background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▲</button>
+                        <button type="button" onClick={() => moveHymn(idx, 1)} disabled={idx === serviceHymns.length - 1}
+                          style={{ fontSize: '12px', background: 'none', border: 'none', cursor: idx === serviceHymns.length - 1 ? 'default' : 'pointer', color: idx === serviceHymns.length - 1 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▼</button>
+                      </div>
+                      {serviceHymns.length > 1 && <button onClick={() => removeHymn(idx)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <div style={{ width: '80px', flexShrink: 0 }}>
@@ -913,7 +949,15 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                 <div key={idx} style={{ border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-400)' }}>{s.is_call_and_response ? 'CALL & RESPONSE' : `READING ${idx + 1}`}</span>
-                    {serviceScriptures.length > 1 && <button onClick={() => removeScripture(idx)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>}
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '2px' }}>
+                        <button type="button" onClick={() => moveScripture(idx, -1)} disabled={idx === 0}
+                          style={{ fontSize: '12px', background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▲</button>
+                        <button type="button" onClick={() => moveScripture(idx, 1)} disabled={idx === serviceScriptures.length - 1}
+                          style={{ fontSize: '12px', background: 'none', border: 'none', cursor: idx === serviceScriptures.length - 1 ? 'default' : 'pointer', color: idx === serviceScriptures.length - 1 ? 'var(--gray-200)' : 'var(--gray-600)' }}>▼</button>
+                      </div>
+                      {serviceScriptures.length > 1 && <button onClick={() => removeScripture(idx)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                     <div style={{ flex: 1 }}>
@@ -929,6 +973,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                     <div style={{ width: '110px', flexShrink: 0 }}>
                       <label className="form-label">Page(s)</label>
                       <input type="text" value={s.page_reference || ''} onChange={e => updateScripture(idx, 'page_reference', e.target.value)} placeholder="e.g. 17-18" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                    </div>
+                    <div style={{ width: '120px', flexShrink: 0 }}>
+                      <label className="form-label">Reader</label>
+                      <input type="text" value={s.reader || ''} onChange={e => updateScripture(idx, 'reader', e.target.value)} placeholder="e.g. Cyndi" style={{ padding: '6px 8px', fontSize: '13px' }} />
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1047,6 +1095,14 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                         {resolved.col3.mode === 'customPage' && (
                           <input type="text" value={row.customPage || ''} onChange={e => setOrderRowCustomField(row.id, 'customPage', e.target.value)}
                             placeholder={resolved.col3.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                        )}
+                        {resolved.col3.mode === 'scripture_reader' && (
+                          <div>
+                            <input type="text" value={resolved.col3.value || ''} disabled={resolved.col3.disabled}
+                              onChange={e => updateScriptureReaderByOccurrence(row.occurrence, e.target.value)}
+                              placeholder={resolved.col3.placeholder} style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }} />
+                            {resolved.col3.caption && <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '2px' }}>{resolved.col3.caption}</div>}
+                          </div>
                         )}
                         {resolved.col3.mode === 'none' && <span style={{ fontSize: '12px', color: 'var(--gray-300)' }}>—</span>}
                       </td>
