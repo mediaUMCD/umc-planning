@@ -211,6 +211,26 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
         col2: { mode: 'direct', field: 'apostles_creed_ref', value: form.apostles_creed_ref, placeholder: 'UMH #881' },
         col3: { mode: 'none' },
       }
+    case 'great_thanksgiving':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Great Thanksgiving', placeholder: 'Great Thanksgiving' },
+        col3: { mode: 'none' },
+      }
+    case 'breaking_the_bread':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Breaking the Bread', placeholder: 'Breaking the Bread' },
+        col3: { mode: 'none' },
+      }
+    case 'imposition_of_ashes':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Imposition of Ashes', placeholder: 'Imposition of Ashes' },
+        col3: { mode: 'none' },
+      }
+    case 'candlelighting':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Candlelighting', placeholder: 'Candlelighting' },
+        col3: { mode: 'none' },
+      }
     case 'pastoral_prayer':
       return {
         col2: { mode: 'readonly', value: 'Joys & Concerns / Pastoral Prayer' },
@@ -327,6 +347,10 @@ const ROW_TYPES = [
   { key: 'special_music', label: 'Special music' },
   { key: 'sermon', label: 'Sermon' },
   { key: 'apostles_creed', label: "Apostles' creed" },
+  { key: 'great_thanksgiving', label: 'Great Thanksgiving' },
+  { key: 'breaking_the_bread', label: 'Breaking the Bread' },
+  { key: 'imposition_of_ashes', label: 'Imposition of Ashes' },
+  { key: 'candlelighting', label: 'Candlelighting' },
   { key: 'pastoral_prayer', label: 'Pastoral prayer' },
   { key: 'lords_prayer', label: "Lord's prayer" },
   { key: 'offertory_prayer', label: 'Offertory prayer' },
@@ -347,8 +371,30 @@ const DEFAULT_ORDER_TYPES = [
 let rowIdCounter = 0
 function newRowId() { rowIdCounter += 1; return `row_${Date.now()}_${rowIdCounter}` }
 
-function buildDefaultOrder() {
-  return DEFAULT_ORDER_TYPES.map(type => ({ id: newRowId(), type, contentOverride: null }))
+// Starter row orders for services whose flow genuinely differs from a Regular
+// Sunday. Anything not listed here falls back to DEFAULT_ORDER_TYPES. She can
+// still freely add/remove/reorder rows afterward — this is just the starting point.
+const SPECIAL_ORDER_TEMPLATES = {
+  'Ash Wednesday': ['welcome', 'call_to_worship', 'hymn', 'scripture', 'sermon', 'imposition_of_ashes', 'pastoral_prayer', 'lords_prayer', 'offertory_prayer', 'benediction'],
+  'Maundy Thursday': ['welcome', 'call_to_worship', 'hymn', 'scripture', 'sermon', 'great_thanksgiving', 'breaking_the_bread', 'benediction'],
+  'Good Friday': ['welcome', 'call_to_worship', 'scripture', 'sermon', 'benediction'],
+  'Christmas Eve': ['welcome', 'call_to_worship', 'hymn', 'scripture', 'sermon', 'special_music', 'candlelighting', 'closing_hymn', 'benediction'],
+}
+
+// Builds the row-type list for a given Service Type, then — if Communion is
+// checked and the template doesn't already include communion rows — splices
+// in Great Thanksgiving / Breaking the Bread right after the sermon (or the
+// creed, or at the end if neither exists).
+function buildOrderForContext(serviceType, isCommunion) {
+  let types = SPECIAL_ORDER_TEMPLATES[serviceType] || DEFAULT_ORDER_TYPES
+  if (isCommunion && !types.includes('great_thanksgiving')) {
+    types = [...types]
+    const insertAt = types.includes('sermon') ? types.indexOf('sermon') + 1
+      : types.includes('apostles_creed') ? types.indexOf('apostles_creed') + 1
+      : types.length
+    types.splice(insertAt, 0, 'great_thanksgiving', 'breaking_the_bread')
+  }
+  return types.map(type => ({ id: newRowId(), type, contentOverride: null }))
 }
 
 // Adds an occurrence index to each row (0-based count of same-type rows seen so far),
@@ -508,6 +554,11 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   function setOrderRowCustomField(id, field, value) {
     setForm(f => ({ ...f, bulletin_order: (f.bulletin_order || []).map(r => r.id === id ? { ...r, [field]: value } : r) }))
   }
+  function syncOrderToTemplate() {
+    const label = `${form.service_type}${form.is_communion ? ' + Communion' : ''}`
+    if (!confirm(`Replace the current Bulletin Order rows with the default template for "${label}"? Your current rows below will be replaced — this can't be undone unless you re-add them manually.`)) return
+    setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion) }))
+  }
 
   // Writes an edited hymn/scripture/sermon title back to its source card.
   function updateSourceForRow(row, occurrence, value) {
@@ -527,7 +578,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   function startNew() {
-    setForm({ ...EMPTY_FORM, bulletin_order: buildDefaultOrder() })
+    setForm({ ...EMPTY_FORM, bulletin_order: buildOrderForContext(EMPTY_FORM.service_type, EMPTY_FORM.is_communion) })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
     setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false }])
     setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
@@ -567,7 +618,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       special_designation: svc.special_designation || '',
       service_time: svc.service_time || '10:15 a.m.',
       back_cover_photo_url: svc.back_cover_photo_url || '',
-      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildDefaultOrder(),
+      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false),
     })
     setServiceHymns(
       svc.service_hymns?.length
@@ -930,9 +981,14 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
         <div className="page-body" style={{ paddingTop: 0 }}>
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
               <h2 style={{ ...sectionHead, margin: 0, border: 'none', paddingBottom: 0 }}>📋 Bulletin Order Preview</h2>
-              <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>Mirrors what prints — reorder, add, or remove rows as needed</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={syncOrderToTemplate}>
+                  🔄 Sync to {form.service_type}{form.is_communion ? ' + Communion' : ''}
+                </button>
+                <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>Mirrors what prints — reorder, add, or remove rows as needed</span>
+              </div>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', borderTop: '1px solid var(--gray-100)' }}>
               <thead>

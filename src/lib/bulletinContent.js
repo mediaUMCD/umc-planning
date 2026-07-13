@@ -75,7 +75,11 @@ export function splitParagraphs(text) {
  * `lines` is an array of strings for multi-line content (call to worship,
  * offertory prayer) so renderers can decide how to break them.
  */
-export function buildOrderOfService(service, hymns, scriptures) {
+/**
+ * Legacy fixed structure — used only as a fallback for services saved before
+ * the row-based Bulletin Order Builder existed (no bulletin_order saved).
+ */
+function buildOrderOfServiceLegacy(service, hymns, scriptures) {
   const openingHymn = hymns.find(h => !h.is_closing) || hymns[0]
   const closingHymn = [...hymns].reverse().find(h => h.is_closing) || (hymns.length > 1 ? hymns[hymns.length - 1] : null)
 
@@ -158,6 +162,142 @@ export function buildOrderOfService(service, hymns, scriptures) {
   items.push({ type: 'static-label', label: 'BENEDICTION' })
 
   return items
+}
+
+/**
+ * Maps one Bulletin Order Builder row into the same item shape the legacy
+ * builder produces, so the docx generator and HTML preview don't need to
+ * know the difference. Returns null for rows with nothing to show (e.g. an
+ * empty custom row, or a hymn/scripture row with no matching source entry).
+ */
+function itemForRow(row, occurrence, service, hymns, scriptures) {
+  switch (row.type) {
+    case 'welcome':
+      // Welcome text is fixed content rendered unconditionally elsewhere — this
+      // row exists only as a visual anchor in the builder preview.
+      return null
+    case 'call_to_worship':
+      return {
+        type: 'block', label: 'CALL TO WORSHIP',
+        lines: service.call_to_worship_text ? service.call_to_worship_text.split('\n') : [],
+      }
+    case 'hymn': {
+      const nonClosing = hymns.filter(h => !h.is_closing)
+      const h = nonClosing[occurrence]
+      if (!h || !h.number) return null
+      const parts = formatHymnParts(h)
+      return { type: 'tabbed', label: 'HYMN', middle: row.contentOverride ?? parts.title, right: parts.ref }
+    }
+    case 'closing_hymn': {
+      const closing = hymns.filter(h => h.is_closing)
+      const h = closing[occurrence]
+      if (!h || !h.number) return null
+      const parts = formatHymnParts(h)
+      return { type: 'tabbed', label: 'HYMN', middle: row.contentOverride ?? parts.title, right: parts.ref }
+    }
+    case 'scripture': {
+      const s = scriptures[occurrence]
+      if (!s || !s.reference) return null
+      const parts = formatScriptureParts(s)
+      return {
+        type: 'tabbed',
+        label: s.is_gospel ? 'GOSPEL LESSON' : 'SCRIPTURE LESSON',
+        middle: row.contentOverride ?? parts.reference,
+        right: parts.page,
+      }
+    }
+    case 'childrens_message':
+      return {
+        type: 'inline',
+        label: service.children_message_label || "CHILDREN'S MESSAGE",
+        value: service.children_message_person || '',
+      }
+    case 'special_music':
+      if (!service.special_music_title && !service.special_music_person) return null
+      return {
+        type: 'inline', label: 'SPECIAL MUSIC',
+        value: [service.special_music_title, service.special_music_person].filter(Boolean).join('   '),
+      }
+    case 'sermon': {
+      const title = row.contentOverride ?? service.spark_title
+      return {
+        type: 'inline', label: 'MESSAGE',
+        value: [title ? `\u201C${title}\u201D` : '', service.spark_preacher].filter(Boolean).join('   '),
+      }
+    }
+    case 'apostles_creed':
+      if (!service.apostles_creed_ref) return null
+      return { type: 'inline', label: 'APOSTLES CREED', value: service.apostles_creed_ref }
+    case 'pastoral_prayer':
+      return { type: 'inline', label: 'JOYS AND CONCERNS/PASTORAL PRAYER', value: service.pastoral_prayer_person || '' }
+    case 'lords_prayer':
+      return { type: 'inline', label: 'LORD\u2019S PRAYER - UMH #895', value: service.lords_prayer_leader || '' }
+    case 'offertory_prayer':
+      return {
+        type: 'block', label: 'OFFERTORY PRAYER',
+        lines: service.offertory_prayer_text ? service.offertory_prayer_text.split('\n') : [],
+        inlineStaticLabel: true,
+      }
+    case 'doxology':
+      if (!service.doxology_ref) return null
+      return { type: 'inline', label: 'DOXOLOGY', value: service.doxology_ref }
+    case 'announcements':
+      return { type: 'inline', label: 'WEEKLY ANNOUNCEMENTS', value: service.announcements_reader || '' }
+    case 'benediction':
+      return { type: 'static-label', label: row.contentOverride ?? 'BENEDICTION' }
+    case 'great_thanksgiving':
+      return { type: 'static-label', label: row.contentOverride ?? 'GREAT THANKSGIVING' }
+    case 'breaking_the_bread':
+      return { type: 'static-label', label: row.contentOverride ?? 'BREAKING THE BREAD' }
+    case 'imposition_of_ashes':
+      return { type: 'static-label', label: row.contentOverride ?? 'IMPOSITION OF ASHES' }
+    case 'candlelighting':
+      return { type: 'static-label', label: row.contentOverride ?? 'CANDLELIGHTING' }
+    case 'custom':
+      if (!row.customLabel && !row.customContent && !row.customPage) return null
+      return { type: 'tabbed', label: row.customLabel || '', middle: row.customContent || '', right: row.customPage || '' }
+    default:
+      return null
+  }
+}
+
+/**
+ * Row-driven builder — used whenever the service has a saved Bulletin Order
+ * Builder row list. Keeps the fixed "RINGING OF THE BELL" opener and the
+ * fixed "OFFERING" blurb (never row-editable, same as before) unconditional,
+ * inserting the Offering text right before whichever of Doxology/Offertory
+ * Prayer appears first, matching the original fixed layout's placement.
+ */
+function buildOrderOfServiceFromRows(service, hymns, scriptures) {
+  const items = []
+  items.push({ type: 'static-label', label: 'RINGING OF THE BELL' })
+
+  const rows = service.bulletin_order
+  const hasDoxologyRow = rows.some(r => r.type === 'doxology')
+  const counters = {}
+  let offeringInserted = false
+
+  for (const row of rows) {
+    const occurrence = counters[row.type] || 0
+    counters[row.type] = occurrence + 1
+
+    if (!offeringInserted && (row.type === 'doxology' || (row.type === 'offertory_prayer' && !hasDoxologyRow))) {
+      items.push({ type: 'block', label: 'OFFERING', lines: [OFFERING_TEXT], inlineStaticLabel: true })
+      offeringInserted = true
+    }
+
+    const item = itemForRow(row, occurrence, service, hymns, scriptures)
+    if (item) items.push(item)
+  }
+
+  return items
+}
+
+export function buildOrderOfService(service, hymns, scriptures) {
+  if (Array.isArray(service.bulletin_order) && service.bulletin_order.length > 0) {
+    return buildOrderOfServiceFromRows(service, hymns, scriptures)
+  }
+  return buildOrderOfServiceLegacy(service, hymns, scriptures)
 }
 
 /**
