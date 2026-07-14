@@ -325,42 +325,46 @@ export default function BulletinImport() {
         }
 
         if (existing) {
-          // Don't overwrite existing season if already set
+         // Don't overwrite existing season if already set
           if (existing.season) delete payload.season
           if (existing.liturgical_color) delete payload.liturgical_color
-          await supabase.from('service_dates').update(payload).eq('id', existing.id)
+          const { error: updateErr } = await supabase.from('service_dates').update(payload).eq('id', existing.id)
+          if (updateErr) throw updateErr
           serviceId = existing.id
         } else {
           const { data: newSvc, error } = await supabase.from('service_dates')
             .insert([{ ...payload, service_date: result.data.service_date }]).select().single()
           if (error) throw error
           serviceId = newSvc.id
-          await supabase.from('upload_tracker').insert(
-            ['service','children','spark','music','special','podcast_spark','podcast_music']
-              .map(t => ({ service_date_id: serviceId, upload_type: t, is_uploaded: false, podcast_published: false }))
+          const { error: trackerErr } = await supabase.from('upload_tracker').insert(
+           ['service','children','spark','music','special','podcast_spark','podcast_music']
+            .map(t => ({ service_date_id: serviceId, upload_type: t, is_uploaded: false, podcast_published: false }))
           )
+          if (trackerErr) throw trackerErr
         }
 
         // Hymns
         await supabase.from('service_hymns').delete().eq('service_date_id', serviceId)
         const validHymns = result.data.hymns.filter(h => h.number && !PAGE_REFS.has(parseInt(h.number)))
         if (validHymns.length > 0) {
-          await supabase.from('service_hymns').insert(
-            validHymns.map((h, j) => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: j + 1, is_closing: h.is_closing || false }))
+          const { error: hymnErr } = await supabase.from('service_hymns').insert(
+           validHymns.map((h, j) => ({ service_date_id: serviceId, hymnal: h.hymnal, number: parseInt(h.number), sort_order: j + 1, is_closing: h.is_closing || false }))
           )
+          if (hymnErr) throw new Error(`Hymns didn't save: ${hymnErr.message}`)
         }
 
         // Scriptures
         await supabase.from('service_scriptures').delete().eq('service_date_id', serviceId)
         const validScriptures = result.data.scriptures.filter(s => s.reference)
         if (validScriptures.length > 0) {
-          await supabase.from('service_scriptures').insert(
-            validScriptures.map((s, j) => ({
-              service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version,
-              is_call_and_response: s.is_call_and_response, sort_order: j + 1,
-              page_reference: s.page_reference || null, is_gospel: s.is_gospel || false,
-            }))
-          )
+        const { error: scriptErr } = await supabase.from('service_scriptures').insert(
+          validScriptures.map((s, j) => ({
+            service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version,
+            is_call_and_response: s.is_call_and_response, sort_order: j + 1,
+            page_reference: s.page_reference || null, is_gospel: s.is_gospel || false,
+          }))
+        )
+        if (scriptErr) throw new Error(`Scriptures didn't save: ${scriptErr.message}`)
         }
 
         count++
