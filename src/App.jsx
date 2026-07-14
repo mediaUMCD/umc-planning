@@ -9,10 +9,12 @@ import UploadTracker from './pages/UploadTracker.jsx'
 import BulletinImport from './pages/BulletinImport.jsx'
 import BulletinSettings from './pages/BulletinSettings.jsx'
 import PhotoManager from './pages/PhotoManager.jsx'
+import Approve from './pages/Approve.jsx'
 import SetList from './pages/SetList.jsx'
 import Sidebar from './components/Sidebar.jsx'
 
 const PUBLIC_PATHS = ['/setlist', '/setlist/']
+const APPROVE_PATHS = ['/approve', '/approve/']
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -24,6 +26,9 @@ export default function App() {
   // Public, unauthenticated route — no login required, no sidebar
   if (PUBLIC_PATHS.includes(window.location.pathname)) {
     return <SetList />
+  }
+  if (APPROVE_PATHS.includes(window.location.pathname)) {
+    return <Approve />
   }
 
   useEffect(() => {

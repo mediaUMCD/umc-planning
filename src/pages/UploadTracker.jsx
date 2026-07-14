@@ -75,6 +75,21 @@ function normalizeDate(cell) {
   return s
 }
 
+// Small colored status pill for the approval workflow.
+function ApprovalBadge({ status }) {
+  const map = {
+    approved: { bg: '#d1f5dd', color: '#1a7a3c', label: '✓ Approved' },
+    pending: { bg: '#fff3cd', color: '#8a6400', label: '⏳ Pending' },
+  }
+  const cfg = map[status]
+  if (!cfg) return null
+  return (
+    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', background: cfg.bg, color: cfg.color }}>
+      {cfg.label}
+    </span>
+  )
+}
+
 export default function UploadTracker() {
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -84,9 +99,14 @@ export default function UploadTracker() {
   const [urlValue, setUrlValue] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [userEmail, setUserEmail] = useState(null)
+  const [sendingApproval, setSendingApproval] = useState(null) // `${serviceId}-${contentType}` while in flight
   const fileInputRef = useRef(null)
 
   useEffect(() => { loadData() }, [filter])
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserEmail(data?.user?.email || null))
+  }, [])
 
   async function loadData() {
     setLoading(true)
@@ -157,6 +177,23 @@ export default function UploadTracker() {
     const payload = { [field]: value || null }
     await supabase.from('service_dates').update(payload).eq('id', serviceId)
     setServices(prev => prev.map(svc => svc.id === serviceId ? { ...svc, ...payload } : svc))
+  }
+
+  async function sendForApproval(svc, contentType) {
+    const key = `${svc.id}-${contentType}`
+    setSendingApproval(key)
+    try {
+      const { data, error } = await supabase.functions.invoke('content-approval', {
+        body: { action: 'request', serviceId: svc.id, contentType, requestedByEmail: userEmail },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      const statusField = `${contentType}_approval_status`
+      setServices(prev => prev.map(s => s.id === svc.id ? { ...s, [statusField]: 'pending' } : s))
+    } catch (err) {
+      alert(`Couldn't send for approval: ${err.message || 'unknown error'}`)
+    }
+    setSendingApproval(null)
   }
 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
@@ -475,26 +512,71 @@ export default function UploadTracker() {
                         <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '10px' }}>
                           📝 Post-Service Recap
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px', alignItems: 'start' }}>
-                          <RecapField
-                            label="Song Title (as sung)"
-                            placeholder="e.g. Great Is Thy Faithfulness"
-                            value={svc.special_music_title}
-                            onSave={val => saveRecapField(svc.id, 'special_music_title', val)}
-                          />
-                          <RecapField
-                            label="Sermon Title"
-                            placeholder="e.g. The Road Home"
-                            value={svc.spark_title}
-                            onSave={val => saveRecapField(svc.id, 'spark_title', val)}
-                          />
-                          <RecapField
-                            label="Podcast Summary"
-                            placeholder="Summary text for the podcast upload…"
-                            value={svc.podcast_summary}
-                            multiline
-                            onSave={val => saveRecapField(svc.id, 'podcast_summary', val)}
-                          />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', alignItems: 'start' }}>
+
+                          {/* Sermon */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-600)' }}>🎤 Sermon</span>
+                              <ApprovalBadge status={svc.sermon_approval_status} />
+                            </div>
+                            <RecapField
+                              label="Sermon Title"
+                              placeholder="e.g. The Road Home"
+                              value={svc.spark_title}
+                              onSave={val => saveRecapField(svc.id, 'spark_title', val)}
+                            />
+                            <RecapField
+                              label="Sermon Podcast Summary"
+                              placeholder="Episode summary for the sermon podcast…"
+                              value={svc.podcast_summary}
+                              multiline
+                              onSave={val => saveRecapField(svc.id, 'podcast_summary', val)}
+                            />
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              disabled={sendingApproval === `${svc.id}-sermon` || svc.sermon_approval_status === 'approved'}
+                              onClick={() => sendForApproval(svc, 'sermon')}
+                              style={{ width: '100%' }}
+                            >
+                              {sendingApproval === `${svc.id}-sermon` ? 'Sending…'
+                                : svc.sermon_approval_status === 'approved' ? '✓ Approved'
+                                : svc.sermon_approval_status === 'pending' ? '↻ Resend for Approval'
+                                : '✉️ Send for Approval'}
+                            </button>
+                          </div>
+
+                          {/* Special Music */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-600)' }}>🎵 Special Music</span>
+                              <ApprovalBadge status={svc.music_approval_status} />
+                            </div>
+                            <RecapField
+                              label="Song Title (as sung)"
+                              placeholder="e.g. Great Is Thy Faithfulness"
+                              value={svc.special_music_title}
+                              onSave={val => saveRecapField(svc.id, 'special_music_title', val)}
+                            />
+                            <RecapField
+                              label="Music Podcast Summary"
+                              placeholder="Episode summary for the Set List podcast…"
+                              value={svc.music_podcast_summary}
+                              multiline
+                              onSave={val => saveRecapField(svc.id, 'music_podcast_summary', val)}
+                            />
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              disabled={sendingApproval === `${svc.id}-music` || svc.music_approval_status === 'approved'}
+                              onClick={() => sendForApproval(svc, 'music')}
+                              style={{ width: '100%' }}
+                            >
+                              {sendingApproval === `${svc.id}-music` ? 'Sending…'
+                                : svc.music_approval_status === 'approved' ? '✓ Approved'
+                                : svc.music_approval_status === 'pending' ? '↻ Resend for Approval'
+                                : '✉️ Send for Approval'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
