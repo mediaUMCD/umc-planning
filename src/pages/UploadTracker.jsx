@@ -238,7 +238,10 @@ export default function UploadTracker() {
       })
       row['Song Title (as sung)'] = svc.special_music_title || ''
       row['Sermon Title'] = svc.spark_title || ''
-      row['Podcast Summary'] = svc.podcast_summary || ''
+      row['Sermon Podcast Summary'] = svc.podcast_summary || ''
+      row['Music Podcast Summary'] = svc.music_podcast_summary || ''
+      row['Sermon Approval Status (reference only)'] = svc.sermon_approval_status || 'draft'
+      row['Music Approval Status (reference only)'] = svc.music_approval_status || 'draft'
       return row
     })
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -302,10 +305,12 @@ export default function UploadTracker() {
         const recapPatch = {}
         const song = String(row['Song Title (as sung)'] || '').trim()
         const sermon = String(row['Sermon Title'] || '').trim()
-        const summary = String(row['Podcast Summary'] || '').trim()
+        const sermonSummary = String(row['Sermon Podcast Summary'] ?? row['Podcast Summary'] ?? '').trim()
+        const musicSummary = String(row['Music Podcast Summary'] || '').trim()
         if (song) recapPatch.special_music_title = song
         if (sermon) recapPatch.spark_title = sermon
-        if (summary) recapPatch.podcast_summary = summary
+        if (sermonSummary) recapPatch.podcast_summary = sermonSummary
+        if (musicSummary) recapPatch.music_podcast_summary = musicSummary
         if (Object.keys(recapPatch).length > 0) {
           await supabase.from('service_dates').update(recapPatch).eq('id', svc.id)
         }
