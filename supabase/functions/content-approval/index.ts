@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { action, serviceId, contentType, requestedByEmail, token } = await req.json()
+    const { action, serviceId, contentType, requestedByEmail, token, title: editedTitle, blurb: editedBlurb } = await req.json()
 
     if (!['sermon', 'music'].includes(contentType)) {
       throw new Error('Invalid contentType — must be "sermon" or "music"')
@@ -109,24 +109,41 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ── Pastor Zach approves ──
+    // ── Pastor Zach approves (optionally after editing) ──
     if (action === 'approve') {
       if (!token) throw new Error('Missing token')
 
+      const titleField = contentType === 'sermon' ? 'spark_title' : 'special_music_title'
+      const blurbField = contentType === 'sermon' ? 'podcast_summary' : 'music_podcast_summary'
+
       const { data: svc, error: fetchErr } = await supabase
         .from('service_dates')
-        .select(`id, service_date, spark_title, special_music_title, ${statusField}, ${tokenField}, ${requestedByField}`)
+        .select(`id, service_date, ${titleField}, ${blurbField}, ${statusField}, ${tokenField}, ${requestedByField}`)
         .eq('id', serviceId)
         .single()
       if (fetchErr || !svc) throw new Error('This approval link is invalid.')
       if (svc[statusField] === 'approved') throw new Error('This has already been approved.')
       if (svc[tokenField] !== token) throw new Error('This approval link is invalid or has already been used.')
 
+      const updatePayload: Record<string, unknown> = {
+        [statusField]: 'approved',
+        [approvedAtField]: new Date().toISOString(),
+        [tokenField]: null,
+      }
+      const titleChanged = typeof editedTitle === 'string' && editedTitle !== (svc[titleField] || '')
+      const blurbChanged = typeof editedBlurb === 'string' && editedBlurb !== (svc[blurbField] || '')
+      if (typeof editedTitle === 'string') updatePayload[titleField] = editedTitle || null
+      if (typeof editedBlurb === 'string') updatePayload[blurbField] = editedBlurb || null
+
       const { error: updateErr } = await supabase
         .from('service_dates')
-        .update({ [statusField]: 'approved', [approvedAtField]: new Date().toISOString(), [tokenField]: null })
+        .update(updatePayload)
         .eq('id', serviceId)
       if (updateErr) throw updateErr
+
+      const finalTitle = typeof editedTitle === 'string' ? editedTitle : svc[titleField]
+      const finalBlurb = typeof editedBlurb === 'string' ? editedBlurb : svc[blurbField]
+      const wasEdited = titleChanged || blurbChanged
 
       const notifyEmail = svc[requestedByField]
       if (notifyEmail) {
@@ -136,17 +153,22 @@ Deno.serve(async (req) => {
           `✓ Approved: ${label} — ${dateStr}`,
           `
             <div style="font-family: Georgia, serif; max-width: 520px;">
-              <p>Pastor Zach approved the <strong>${label}</strong> title and summary for <strong>${dateStr}</strong>.</p>
+              <p>Pastor Zach approved the <strong>${label}</strong> title and summary for <strong>${dateStr}</strong>${wasEdited ? ' — <strong>with edits</strong>' : ''}.</p>
+              ${wasEdited ? `
+                <p style="margin: 16px 0; padding: 16px; background: #F7E6F0; border-radius: 8px;">
+                  <strong>Title:</strong> ${finalTitle || '(none)'}<br><br>
+                  <strong>Summary:</strong><br>${(finalBlurb || '(none)').replace(/\n/g, '<br>')}
+                </p>
+              ` : ''}
               <p>You're all set to publish it.</p>
             </div>
           `
         )
       }
 
-      return new Response(JSON.stringify({
-        success: true,
-        title: contentType === 'sermon' ? svc.spark_title : svc.special_music_title,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ success: true, title: finalTitle, edited: wasEdited }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     throw new Error('Unknown action — must be "request" or "approve"')

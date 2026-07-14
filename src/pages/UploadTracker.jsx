@@ -196,6 +196,16 @@ export default function UploadTracker() {
     setSendingApproval(null)
   }
 
+  async function selfApprove(svc, contentType) {
+    if (!confirm(`Mark this ${contentType === 'sermon' ? 'sermon' : 'special music'} as approved yourself? Pastor Zach won't be emailed.`)) return
+    const statusField = `${contentType}_approval_status`
+    const approvedAtField = `${contentType}_approved_at`
+    const tokenField = `${contentType}_approval_token`
+    const payload = { [statusField]: 'approved', [approvedAtField]: new Date().toISOString(), [tokenField]: null }
+    await supabase.from('service_dates').update(payload).eq('id', svc.id)
+    setServices(prev => prev.map(s => s.id === svc.id ? { ...s, ...payload } : s))
+  }
+
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
 
   const getTracker = (svc, key) => svc.upload_tracker?.find(t => t.upload_type === key)
@@ -544,6 +554,14 @@ export default function UploadTracker() {
                                 : svc.sermon_approval_status === 'pending' ? '↻ Resend for Approval'
                                 : '✉️ Send for Approval'}
                             </button>
+                            {svc.sermon_approval_status !== 'approved' && (
+                              <button
+                                onClick={() => selfApprove(svc, 'sermon')}
+                                style={{ width: '100%', marginTop: '4px', background: 'none', border: 'none', color: 'var(--gray-400)', fontSize: '11px', cursor: 'pointer', textDecoration: 'underline' }}
+                              >
+                                or approve it yourself (e.g. for backlog)
+                              </button>
+                            )}
                           </div>
 
                           {/* Special Music */}
@@ -576,6 +594,14 @@ export default function UploadTracker() {
                                 : svc.music_approval_status === 'pending' ? '↻ Resend for Approval'
                                 : '✉️ Send for Approval'}
                             </button>
+                            {svc.music_approval_status !== 'approved' && (
+                              <button
+                                onClick={() => selfApprove(svc, 'music')}
+                                style={{ width: '100%', marginTop: '4px', background: 'none', border: 'none', color: 'var(--gray-400)', fontSize: '11px', cursor: 'pointer', textDecoration: 'underline' }}
+                              >
+                                or approve it yourself (e.g. for backlog)
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>

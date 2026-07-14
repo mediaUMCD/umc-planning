@@ -21,6 +21,8 @@ export default function Approve() {
   const [error, setError] = useState(null)
   const [approving, setApproving] = useState(false)
   const [approved, setApproved] = useState(false)
+  const [editedTitle, setEditedTitle] = useState('')
+  const [editedBlurb, setEditedBlurb] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -57,6 +59,8 @@ export default function Approve() {
       }
 
       setSvc(data)
+      setEditedTitle((type === 'sermon' ? data.spark_title : data.special_music_title) || '')
+      setEditedBlurb((type === 'sermon' ? data.podcast_summary : data.music_podcast_summary) || '')
       setLoading(false)
     }
     load()
@@ -67,7 +71,7 @@ export default function Approve() {
     setError(null)
     try {
       const { data, error: fnError } = await supabase.functions.invoke('content-approval', {
-        body: { action: 'approve', serviceId, contentType: type, token },
+        body: { action: 'approve', serviceId, contentType: type, token, title: editedTitle, blurb: editedBlurb },
       })
       if (fnError) throw fnError
       if (data?.error) throw new Error(data.error)
@@ -79,8 +83,6 @@ export default function Approve() {
   }
 
   const label = CONTENT_LABELS[type]
-  const title = svc ? (type === 'sermon' ? svc.spark_title : svc.special_music_title) : ''
-  const blurb = svc ? (type === 'sermon' ? svc.podcast_summary : svc.music_podcast_summary) : ''
 
   return (
     <div style={{ minHeight: '100vh', background: '#FAF7F8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', fontFamily: 'Georgia, serif' }}>
@@ -104,7 +106,7 @@ export default function Approve() {
             <h1 style={{ fontSize: '20px', color: '#3D0026', marginBottom: '8px' }}>Approved!</h1>
             <p style={{ color: '#666', fontSize: '14px' }}>
               {label} {svc?.service_date ? `for ${formatServiceDate(svc.service_date)}` : ''} has been marked approved.
-              {title && <> Thanks for reviewing "<strong>{title}</strong>."</>}
+              {editedTitle && <> Thanks for reviewing "<strong>{editedTitle}</strong>."</>}
             </p>
           </div>
         )}
@@ -115,14 +117,26 @@ export default function Approve() {
               {label}
             </div>
             <h1 style={{ fontSize: '20px', color: '#3D0026', marginBottom: '4px' }}>{formatServiceDate(svc.service_date)}</h1>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>Please review before it's published.</p>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>Edit if anything's off, then approve.</p>
 
-            <div style={{ background: '#F7E6F0', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#7A0047', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Title</div>
-              <div style={{ fontSize: '16px', color: '#1a1a1a', marginBottom: '14px' }}>{title || <em style={{ color: '#999' }}>(none entered)</em>}</div>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#7A0047', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '4px' }}>Title</label>
+              <input
+                type="text"
+                value={editedTitle}
+                onChange={e => setEditedTitle(e.target.value)}
+                placeholder="(none entered)"
+                style={{ width: '100%', fontSize: '16px', color: '#1a1a1a', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e0d5db', boxSizing: 'border-box', fontFamily: 'inherit', marginBottom: '14px' }}
+              />
 
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#7A0047', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Episode Summary</div>
-              <div style={{ fontSize: '14px', color: '#1a1a1a', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{blurb || <em style={{ color: '#999' }}>(none entered)</em>}</div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#7A0047', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '4px' }}>Episode Summary</label>
+              <textarea
+                value={editedBlurb}
+                onChange={e => setEditedBlurb(e.target.value)}
+                placeholder="(none entered)"
+                rows={5}
+                style={{ width: '100%', fontSize: '14px', color: '#1a1a1a', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e0d5db', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical' }}
+              />
             </div>
 
             {error && <p style={{ color: '#c62828', fontSize: '13px', marginBottom: '12px' }}>{error}</p>}
