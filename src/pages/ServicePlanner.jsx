@@ -713,12 +713,17 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   const today = new Date().toISOString().slice(0, 10)
-  const filteredServices = services.filter(s => {
-    if (searchDate) return s.service_date === searchDate
-    if (filter === 'upcoming') return s.service_date >= today
-    if (filter === 'past') return s.service_date < today
-    return true
-  })
+  const filteredServices = services
+    .filter(s => {
+      if (searchDate) return s.service_date === searchDate
+      if (filter === 'upcoming') return s.service_date >= today
+      if (filter === 'past') return s.service_date < today
+      return true
+    })
+    .sort((a, b) => {
+      if (filter === 'past' && !searchDate) return b.service_date.localeCompare(a.service_date)
+      return a.service_date.localeCompare(b.service_date)
+    })
 
   // ── EDIT VIEW ──
   if (view === 'edit') {
