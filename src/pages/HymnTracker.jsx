@@ -64,7 +64,7 @@ export default function HymnTracker() {
     setLoading(false)
   }
 
-  async function loadHymnHistory(hymn) {
+async function loadHymnHistory(hymn) {
     setSelectedHymn(hymn)
     setToggleError(null)
     setFileError(null)
@@ -74,8 +74,15 @@ export default function HymnTracker() {
       .select('*, service_dates(service_date, season, liturgical_color)')
       .eq('hymnal', hymn.hymnal)
       .eq('number', hymn.number)
-      .order('created_at', { ascending: false })
-    setHymnHistory(data || [])
+    // Sort by the actual service date, not by when the row was inserted —
+    // backlog imports get added long after the service happened, so
+    // created_at order can put an old service above a more recent one.
+    const sorted = (data || []).slice().sort((a, b) => {
+      const da = a.service_dates?.service_date || ''
+      const db = b.service_dates?.service_date || ''
+      return db.localeCompare(da)
+    })
+    setHymnHistory(sorted)
     setHistoryLoading(false)
     loadHymnFiles(hymn)
   }
