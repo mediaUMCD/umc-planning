@@ -2,11 +2,22 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 
 const BUCKET = 'hymn-files'
+const UPLOAD_TIMEOUT_MS = 120000 // 2 minutes
+
+function formatBytes(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 async function uploadToStorage(file) {
   const ext = file.name.split('.').pop()
   const safeName = `${crypto.randomUUID()}.${ext}`
-  const { error } = await supabase.storage.from(BUCKET).upload(safeName, file, { cacheControl: '3600', upsert: false })
+  const uploadPromise = supabase.storage.from(BUCKET).upload(safeName, file, { cacheControl: '3600', upsert: false })
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s — the file may be too large (check the bucket's file size limit in Supabase) or your connection is slow. It may still finish in the background; check the Files list in a minute before re-uploading.`)), UPLOAD_TIMEOUT_MS)
+  )
+  const { error } = await Promise.race([uploadPromise, timeoutPromise])
   if (error) throw error
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(safeName)
   return data.publicUrl
@@ -38,6 +49,7 @@ export default function HymnTracker() {
   const [uploadLabel, setUploadLabel] = useState('')
   const [uploadFile, setUploadFile] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadSeconds, setUploadSeconds] = useState(0)
   const [fileError, setFileError] = useState(null)
 
   useEffect(() => { loadHymns() }, [])
@@ -120,7 +132,9 @@ export default function HymnTracker() {
     e.preventDefault()
     if (!uploadFile || !selectedHymn) return
     setUploading(true)
+    setUploadSeconds(0)
     setFileError(null)
+    const tick = setInterval(() => setUploadSeconds(s => s + 1), 1000)
     try {
       const url = await uploadToStorage(uploadFile)
       const { error } = await supabase.from('hymn_files').insert([{
@@ -137,6 +151,7 @@ export default function HymnTracker() {
     } catch (err) {
       setFileError(err.message)
     }
+    clearInterval(tick)
     setUploading(false)
   }
 
@@ -358,10 +373,16 @@ export default function HymnTracker() {
                   onChange={e => setUploadFile(e.target.files?.[0] || null)}
                   style={{ fontSize: '12px' }}
                 />
+                {uploadFile && <span style={{ fontSize: '11px', color: 'var(--gray-400)', alignSelf: 'center' }}>{formatBytes(uploadFile.size)}</span>}
                 <button type="submit" className="btn btn-primary btn-sm" disabled={!uploadFile || uploading}>
-                  {uploading ? 'Uploading…' : '+ Add File'}
+                  {uploading ? `Uploading… ${uploadSeconds}s` : '+ Add File'}
                 </button>
               </form>
+              {uploading && uploadFile && uploadFile.size > 20 * 1024 * 1024 && (
+                <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>
+                  {formatBytes(uploadFile.size)} is a larger file — this can take a few minutes depending on your connection. It'll time out with a clear error at 2 minutes if something's actually wrong.
+                </div>
+              )}
               {fileError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '10px' }}>{fileError}</div>}
 
               {filesLoading ? <div className="spinner" /> : hymnFiles.length === 0 ? (
