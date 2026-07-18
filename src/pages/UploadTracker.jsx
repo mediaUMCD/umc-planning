@@ -270,6 +270,7 @@ export default function UploadTracker() {
 
       let updated = 0
       const skipped = []
+      const noChanges = []
 
       for (const row of rows) {
         const dateStr = normalizeDate(row['Date'])
@@ -315,10 +316,11 @@ export default function UploadTracker() {
           await supabase.from('service_dates').update(recapPatch).eq('id', svc.id)
         }
 
-        if (trackerPatches.length > 0 || Object.keys(recapPatch).length > 0) updated++
+       if (trackerPatches.length > 0 || Object.keys(recapPatch).length > 0) updated++
+        else noChanges.push(dateStr)
       }
 
-      setImportResult({ updated, skipped, total: rows.length })
+      setImportResult({ updated, skipped, noChanges, total: rows.length })
       await loadData()
     } catch (err) {
       console.error(err)
@@ -366,6 +368,14 @@ export default function UploadTracker() {
                 <span style={{ color: 'var(--danger)' }}>
                   {importResult.skipped.length} date{importResult.skipped.length === 1 ? '' : 's'} didn't match an existing service and were skipped: {importResult.skipped.join(', ')}
                 </span>
+              )}
+              {importResult.noChanges && importResult.noChanges.length > 0 && (
+                <details style={{ color: 'var(--gray-600)' }}>
+                  <summary style={{ cursor: 'pointer' }}>
+                    {importResult.noChanges.length} date{importResult.noChanges.length === 1 ? '' : 's'} matched a service but had nothing filled in — nothing to update
+                  </summary>
+                  <div style={{ marginTop: '6px', fontSize: '12px' }}>{importResult.noChanges.join(', ')}</div>
+                </details>
               )}
             </div>
           )}
