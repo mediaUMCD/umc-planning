@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
+import VolunteerRolesPanel from '../components/VolunteerRolesPanel.jsx'
 
 function getSeasonStyle(color) {
   const map = {
@@ -190,6 +191,8 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
               </div>
             ))}
           </div>
+
+          <VolunteerRolesPanel serviceId={service.id} serviceDate={service.service_date} serviceTime={service.service_time} />
 
         </div>
       </div>

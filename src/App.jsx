@@ -9,6 +9,7 @@ import UploadTracker from './pages/UploadTracker.jsx'
 import BulletinImport from './pages/BulletinImport.jsx'
 import BulletinSettings from './pages/BulletinSettings.jsx'
 import PhotoManager from './pages/PhotoManager.jsx'
+import CheckRequests from './pages/CheckRequests.jsx'
 import Approve from './pages/Approve.jsx'
 import SetList from './pages/SetList.jsx'
 import Sidebar from './components/Sidebar.jsx'
@@ -19,6 +20,8 @@ const APPROVE_PATHS = ['/approve', '/approve/']
 export default function App() {
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [roles, setRoles] = useState([])
+  const [rolesLoaded, setRolesLoaded] = useState(false)
   const [page, setPage] = useState('dashboard')
   const [selectedServiceId, setSelectedServiceId] = useState(null)
   const [editServiceId, setEditServiceId] = useState(null)
@@ -35,14 +38,31 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setAuthLoading(false)
+      if (session) fetchRoles(session.user.id)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      if (session) fetchRoles(session.user.id)
+      else { setRoles([]); setRolesLoaded(false) }
     })
     return () => subscription.unsubscribe()
   }, [])
 
-  if (authLoading) {
+  async function fetchRoles(userId) {
+    const { data } = await supabase.from('user_roles').select('role').eq('user_id', userId)
+    setRoles((data || []).map(r => r.role))
+    setRolesLoaded(true)
+  }
+
+  const isAdmin = roles.includes('admin')
+  const isFinanceOnly = roles.includes('finance') && !isAdmin
+
+  // Finance-only logins are scoped to just Check Requests, everywhere else.
+  useEffect(() => {
+    if (isFinanceOnly && page !== 'check-requests') setPage('check-requests')
+  }, [isFinanceOnly, page])
+
+  if (authLoading || (session && !rolesLoaded)) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
         <div className="spinner" />
@@ -64,6 +84,8 @@ export default function App() {
   }
 
   const renderPage = () => {
+    if (isFinanceOnly) return <CheckRequests />
+
     switch (page) {
       case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} />
       case 'planner': return (
@@ -85,13 +107,14 @@ export default function App() {
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
       case 'photos': return <PhotoManager />
+      case 'check-requests': return <CheckRequests />
       default: return <Dashboard navigate={setPage} />
     }
   }
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} navigate={setPage} session={session} />
+      <Sidebar page={page} navigate={setPage} session={session} isFinanceOnly={isFinanceOnly} />
       <div className="main-content">
         {renderPage()}
       </div>

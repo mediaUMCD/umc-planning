@@ -8,6 +8,11 @@ const NAV_ITEMS = [
   { id: 'import', icon: '/icons/icon-bulletin-import.png', label: 'Bulletin Import' },
   { id: 'bulletin-settings', icon: '/icons/icon-weekly-bulletin.png', label: 'Bulletin Settings' },
   { id: 'photos', icon: '/icons/icon-event-photos.png', label: 'Photo Manager' },
+  { id: 'check-requests', icon: '/icons/icon-upload-tracker.png', label: 'Check Requests' },
+]
+
+const FINANCE_ONLY_NAV_ITEMS = [
+  { id: 'check-requests', icon: '/icons/icon-upload-tracker.png', label: 'Check Requests' },
 ]
 
 const OTHER_APPS = [
@@ -17,10 +22,12 @@ const OTHER_APPS = [
   { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
 
-export default function Sidebar({ page, navigate, session }) {
+export default function Sidebar({ page, navigate, session, isFinanceOnly }) {
   async function handleLogout() {
     await supabase.auth.signOut()
   }
+
+  const items = isFinanceOnly ? FINANCE_ONLY_NAV_ITEMS : NAV_ITEMS
 
   return (
     <div className="sidebar">
@@ -28,14 +35,14 @@ export default function Sidebar({ page, navigate, session }) {
       <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <img src="/icons/icon-service-planner.png" alt="" style={{ width: '32px', height: '32px', marginBottom: '6px' }} />
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'white', lineHeight: 1.3 }}>
-          UMCD<br />Planning Hub
+          UMCD<br />{isFinanceOnly ? 'Finance' : 'Planning Hub'}
         </div>
         <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '4px' }}>Bumble Bee Studios</div>
       </div>
 
       {/* Main nav */}
       <nav style={{ flex: 1, padding: '12px 0' }}>
-        {NAV_ITEMS.map(item => (
+        {items.map(item => (
           <button
             key={item.id}
             onClick={() => navigate(item.id)}
@@ -57,38 +64,40 @@ export default function Sidebar({ page, navigate, session }) {
         ))}
       </nav>
 
-      {/* Other Apps */}
-      <div style={{ padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-        <div style={{
-          fontSize: '10px', fontWeight: 700, textTransform: 'uppercase',
-          letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)',
-          padding: '4px 20px 8px',
-        }}>
-          Other Apps
+      {/* Other Apps — hidden for finance-only logins to keep things simple */}
+      {!isFinanceOnly && (
+        <div style={{ padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{
+            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)',
+            padding: '4px 20px 8px',
+          }}>
+            Other Apps
+          </div>
+          {OTHER_APPS.map(app => (
+            <a
+              key={app.href}
+              href={app.href}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '9px 20px',
+                color: 'rgba(255,255,255,0.55)',
+                fontSize: '13px',
+                textDecoration: 'none',
+                borderLeft: '3px solid transparent',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = 'white'}
+              onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.55)'}
+            >
+              <span style={{ fontSize: '15px' }}>{app.icon}</span>
+              {app.label}
+            </a>
+          ))}
         </div>
-        {OTHER_APPS.map(app => (
-          <a
-            key={app.href}
-            href={app.href}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '9px 20px',
-              color: 'rgba(255,255,255,0.55)',
-              fontSize: '13px',
-              textDecoration: 'none',
-              borderLeft: '3px solid transparent',
-              transition: 'color 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.color = 'white'}
-            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.55)'}
-          >
-            <span style={{ fontSize: '15px' }}>{app.icon}</span>
-            {app.label}
-          </a>
-        ))}
-      </div>
+      )}
 
       {/* Sign out */}
       <div style={{ padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
