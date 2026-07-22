@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 
 const BACKUP_BUCKET = 'check-request-backup'
 
@@ -22,6 +23,7 @@ const DELIVERY_LABELS = {
   mail_to_requester: 'Mail to requester',
   mail_other: 'Mail to someone else',
 }
+const UNPAID_STATUSES = ['submitted', 'under_review', 'approved']
 
 const money = (n) => Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 const fmtDate = (d) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
@@ -37,18 +39,35 @@ function StatusBadge({ status }) {
 
 export default function CheckRequests() {
   const [requests, setRequests] = useState([])
+  const [filesByRequest, setFilesByRequest] = useState({}) // { [request_id]: [file, ...] }
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('active') // active = everything but sent/denied
+  const [statusFilter, setStatusFilter] = useState('active')
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState(null)   // request object being viewed/edited
+  const [selected, setSelected] = useState(null)       // group object being viewed/edited
   const [showNew, setShowNew] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())  // request ids checked for merging
+  const [merging, setMerging] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState('')
+  const [error, setError] = useState('')
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('check_requests').select('*').order('request_date', { ascending: false })
+    setError('')
+    const { data, error: reqErr } = await supabase.from('check_requests').select('*').order('request_date', { ascending: false })
+    if (reqErr) { setError(reqErr.message); setLoading(false); return }
     setRequests(data || [])
+
+    const { data: files, error: fileErr } = await supabase.from('check_request_files').select('*').order('sort_order')
+    if (fileErr) { setError(fileErr.message); setLoading(false); return }
+    const byReq = {}
+    ;(files || []).forEach(f => {
+      byReq[f.check_request_id] = byReq[f.check_request_id] || []
+      byReq[f.check_request_id].push(f)
+    })
+    setFilesByRequest(byReq)
     setLoading(false)
   }
 
@@ -56,25 +75,140 @@ export default function CheckRequests() {
     [...new Set(requests.map(r => r.category).filter(Boolean))].sort(),
   [requests])
 
-  const filtered = useMemo(() => {
-    let list = requests
-    if (statusFilter === 'active') list = list.filter(r => !['sent', 'denied'].includes(r.status))
-    else if (statusFilter !== 'all') list = list.filter(r => r.status === statusFilter)
+  // Group requests by payment_group_id — a group is one payment, possibly covering
+  // several submitted requests merged together.
+  const groups = useMemo(() => {
+    const byGroup = {}
+    const standalone = []
+    requests.forEach(r => {
+      if (r.payment_group_id) {
+        byGroup[r.payment_group_id] = byGroup[r.payment_group_id] || []
+        byGroup[r.payment_group_id].push(r)
+      } else {
+        standalone.push({ groupId: null, members: [r] })
+      }
+    })
+    const grouped = Object.entries(byGroup).map(([groupId, members]) => ({ groupId, members }))
+    return [...grouped, ...standalone].sort((a, b) =>
+      new Date(b.members[0].request_date) - new Date(a.members[0].request_date)
+    )
+  }, [requests])
+
+  const filteredGroups = useMemo(() => {
+    let list = groups
+    if (statusFilter === 'active') list = list.filter(g => g.members.some(m => UNPAID_STATUSES.includes(m.status)))
+    else if (statusFilter !== 'all') list = list.filter(g => g.members.every(m => m.status === statusFilter))
     if (search.trim()) {
       const q = search.trim().toLowerCase()
-      list = list.filter(r =>
-        r.request_number?.toLowerCase().includes(q) ||
-        r.requester_name?.toLowerCase().includes(q) ||
-        r.payee_name?.toLowerCase().includes(q) ||
-        r.description?.toLowerCase().includes(q)
-      )
+      list = list.filter(g => g.members.some(m =>
+        m.request_number?.toLowerCase().includes(q) ||
+        m.requester_name?.toLowerCase().includes(q) ||
+        m.payee_name?.toLowerCase().includes(q) ||
+        m.description?.toLowerCase().includes(q)
+      ))
     }
     return list
-  }, [requests, statusFilter, search])
+  }, [groups, statusFilter, search])
 
-  function upsertLocal(updated) {
-    setRequests(prev => prev.map(r => r.id === updated.id ? updated : r))
-    setSelected(updated)
+  function upsertLocal(updatedRequests) {
+    setRequests(prev => prev.map(r => {
+      const match = updatedRequests.find(u => u.id === r.id)
+      return match || r
+    }))
+  }
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectGroup(group) {
+    const ids = group.members.map(m => m.id)
+    const allSelected = ids.every(id => selectedIds.has(id))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
+  async function mergeSelected() {
+    if (selectedIds.size < 2) return
+    setMerging(true)
+    setError('')
+    const groupId = crypto.randomUUID()
+    const ids = [...selectedIds]
+    const { data, error: mergeErr } = await supabase.from('check_requests').update({ payment_group_id: groupId }).in('id', ids).select()
+    setMerging(false)
+    if (mergeErr) { setError(mergeErr.message); return }
+    upsertLocal(data)
+    setSelectedIds(new Set())
+  }
+
+  async function unmergeRequest(requestId) {
+    const { data, error: err } = await supabase.from('check_requests').update({ payment_group_id: null }).eq('id', requestId).select().single()
+    if (err) { setError(err.message); return }
+    upsertLocal([data])
+    setSelected(null)
+  }
+
+  const [emailTo, setEmailTo] = useState(() => localStorage.getItem('checkRequestsPdfEmail') || 'financeemails@umcdanielson.org')
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false)
+  const [emailing, setEmailing] = useState(false)
+  const [emailMsg, setEmailMsg] = useState('')
+
+  function unpaidGroupsList() {
+    return groups.filter(g => g.members.some(m => UNPAID_STATUSES.includes(m.status)))
+  }
+
+  async function downloadAllUnpaid() {
+    const unpaidGroups = unpaidGroupsList()
+    if (unpaidGroups.length === 0) { alert('Nothing unpaid to download.'); return }
+    setDownloading(true)
+    setError('')
+    try {
+      const bytes = await buildCombinedPdf(unpaidGroups, filesByRequest, setDownloadProgress)
+      triggerPdfDownload(bytes, `unpaid-check-requests-${new Date().toISOString().slice(0, 10)}.pdf`)
+    } catch (err) {
+      setError('Download failed: ' + err.message)
+    }
+    setDownloading(false)
+    setDownloadProgress('')
+  }
+
+  async function emailAllUnpaid() {
+    if (!emailTo.trim()) { setShowEmailPrompt(true); return }
+    const unpaidGroups = unpaidGroupsList()
+    if (unpaidGroups.length === 0) { alert('Nothing unpaid to email.'); return }
+    localStorage.setItem('checkRequestsPdfEmail', emailTo.trim())
+    setEmailing(true)
+    setError('')
+    setEmailMsg('')
+    try {
+      const bytes = await buildCombinedPdf(unpaidGroups, filesByRequest, setDownloadProgress)
+      const filename = `unpaid-check-requests-${new Date().toISOString().slice(0, 10)}.pdf`
+      const { data, error } = await supabase.functions.invoke('send-pdf-email', {
+        body: {
+          to: emailTo.trim(),
+          subject: `Unpaid Check Requests — ${new Date().toLocaleDateString('en-US')}`,
+          message: `Attached: ${unpaidGroups.length} unpaid check request${unpaidGroups.length === 1 ? '' : 's'}, with cover pages and receipts.`,
+          filename,
+          pdfBase64: bytesToBase64(bytes),
+        },
+      })
+      if (error || !data?.sent) throw new Error(error?.message || 'Email failed to send')
+      setEmailMsg(`✅ Sent to ${emailTo.trim()}`)
+      setShowEmailPrompt(false)
+    } catch (err) {
+      setError('Email failed: ' + err.message)
+    }
+    setEmailing(false)
+    setDownloadProgress('')
+    setTimeout(() => setEmailMsg(''), 6000)
   }
 
   return (
@@ -83,10 +217,39 @@ export default function CheckRequests() {
         <div>
           <div className="page-title">Check Requests</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowNew(true)}>+ New Request</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {emailMsg && <span style={{ fontSize: 13 }}>{emailMsg}</span>}
+          <button className="btn btn-secondary" onClick={() => setShowEmailPrompt(true)} disabled={emailing}>
+            {emailing ? (downloadProgress || 'Sending…') : '📧 Email PDF to OneDrive Inbox'}
+          </button>
+          <button className="btn btn-secondary" onClick={downloadAllUnpaid} disabled={downloading}>
+            {downloading ? (downloadProgress || 'Building PDF…') : '📥 Download All Unpaid'}
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowNew(true)}>+ New Request</button>
+        </div>
       </div>
 
+      {showEmailPrompt && (
+        <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label className="form-label" style={{ marginBottom: 0 }}>Send to:</label>
+          <input
+            className="form-input" type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)}
+            placeholder="the inbox your OneDrive rule watches"
+            style={{ maxWidth: 320, padding: '7px 10px', fontSize: 13, borderRadius: 8, border: '1px solid var(--gray-200)' }}
+          />
+          <button className="btn btn-primary btn-sm" onClick={emailAllUnpaid} disabled={emailing}>
+            {emailing ? (downloadProgress || 'Sending…') : 'Send'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowEmailPrompt(false)}>Cancel</button>
+          <p style={{ width: '100%', fontSize: 12, color: 'var(--gray-400)', margin: 0 }}>
+            Remembered on this device for next time — change it any time.
+          </p>
+        </div>
+      )}
+
       <div className="page-body">
+        {error && <div className="alert alert-error">{error}</div>}
+
         <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {['active', 'submitted', 'under_review', 'approved', 'sent', 'denied', 'all'].map(s => (
@@ -104,15 +267,27 @@ export default function CheckRequests() {
           />
         </div>
 
+        {selectedIds.size > 0 && (
+          <div className="card" style={{ marginBottom: 16, background: '#f3e6ed', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{selectedIds.size} selected</span>
+            <button className="btn btn-primary btn-sm" onClick={mergeSelected} disabled={selectedIds.size < 2 || merging}>
+              {merging ? 'Merging…' : `🔗 Merge into One Payment`}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setSelectedIds(new Set())}>Clear</button>
+            {selectedIds.size === 1 && <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>Select at least 2 to merge.</span>}
+          </div>
+        )}
+
         {loading ? (
           <div className="spinner" />
-        ) : filtered.length === 0 ? (
+        ) : filteredGroups.length === 0 ? (
           <div className="empty-state"><div className="icon">🧾</div><p>No check requests here.</p></div>
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table className="data-table">
               <thead>
                 <tr>
+                  <th></th>
                   <th>Request #</th>
                   <th>Date</th>
                   <th>Requester</th>
@@ -123,17 +298,34 @@ export default function CheckRequests() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
-                  <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}>
-                    <td style={{ fontWeight: 600 }}>{r.request_number}</td>
-                    <td>{fmtDate(r.request_date)}</td>
-                    <td>{r.requester_name}</td>
-                    <td>{r.payee_name}</td>
-                    <td>{money(r.amount)}</td>
-                    <td>{fmtDate(r.needed_by_date)}</td>
-                    <td><StatusBadge status={r.status} /></td>
-                  </tr>
-                ))}
+                {filteredGroups.map(g => {
+                  const isGroup = g.members.length > 1
+                  const primary = g.members[0]
+                  const total = g.members.reduce((s, m) => s + Number(m.amount), 0)
+                  const allChecked = g.members.every(m => selectedIds.has(m.id))
+                  const someChecked = g.members.some(m => selectedIds.has(m.id))
+                  const statuses = [...new Set(g.members.map(m => m.status))]
+                  return (
+                    <tr key={g.groupId || primary.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(g)}>
+                      <td onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={allChecked} ref={el => { if (el) el.indeterminate = someChecked && !allChecked }}
+                          onChange={() => toggleSelectGroup(g)} />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>
+                        {isGroup ? `${g.members.length} requests` : primary.request_number}
+                        {isGroup && <div style={{ fontSize: 11, color: 'var(--gray-400)', fontWeight: 400 }}>{g.members.map(m => m.request_number).join(', ')}</div>}
+                      </td>
+                      <td>{fmtDate(primary.request_date)}</td>
+                      <td>{isGroup ? [...new Set(g.members.map(m => m.requester_name))].join(', ') : primary.requester_name}</td>
+                      <td>{primary.payee_name}</td>
+                      <td>{money(total)}</td>
+                      <td>{fmtDate(g.members.reduce((min, m) => !min || m.needed_by_date < min ? m.needed_by_date : min, null))}</td>
+                      <td>
+                        {statuses.length === 1 ? <StatusBadge status={statuses[0]} /> : <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>Mixed</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -142,10 +334,12 @@ export default function CheckRequests() {
 
       {selected && (
         <DetailModal
-          request={selected}
+          group={selected}
           categories={categories}
+          filesByRequest={filesByRequest}
           onClose={() => setSelected(null)}
           onSaved={upsertLocal}
+          onUnmerge={unmergeRequest}
         />
       )}
 
@@ -159,27 +353,28 @@ export default function CheckRequests() {
   )
 }
 
-// ── Detail / edit modal ──────────────────────────────────────────────────
-function DetailModal({ request, categories, onClose, onSaved }) {
+// ── Detail / edit modal — handles both a single request and a merged group ──
+function DetailModal({ group, categories, filesByRequest, onClose, onSaved, onUnmerge }) {
+  const isGroup = group.members.length > 1
+  const primary = group.members[0]
+  const total = group.members.reduce((s, m) => s + Number(m.amount), 0)
+
   const [form, setForm] = useState({
-    status: request.status,
-    category: request.category || '',
-    finance_notes: request.finance_notes || '',
-    check_number: request.check_number || '',
-    sent_date: request.sent_date || '',
+    status: primary.status,
+    category: primary.category || '',
+    finance_notes: primary.finance_notes || '',
+    check_number: primary.check_number || '',
+    sent_date: primary.sent_date || '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [fileUrl, setFileUrl] = useState(null)
-  const [fileLoading, setFileLoading] = useState(false)
+  const [fileLoading, setFileLoading] = useState(null)
 
-  async function viewBackup() {
-    if (!request.backup_file_url) return
-    setFileLoading(true)
-    const { data, error } = await supabase.storage.from(BACKUP_BUCKET).createSignedUrl(request.backup_file_url, 300)
-    setFileLoading(false)
-    if (error) { setError('Could not load backup file: ' + error.message); return }
-    setFileUrl(data.signedUrl)
+  async function viewFile(file) {
+    setFileLoading(file.id)
+    const { data, error } = await supabase.storage.from(BACKUP_BUCKET).createSignedUrl(file.file_url, 300)
+    setFileLoading(null)
+    if (error) { setError('Could not load file: ' + error.message); return }
     window.open(data.signedUrl, '_blank')
   }
 
@@ -193,7 +388,9 @@ function DetailModal({ request, categories, onClose, onSaved }) {
       check_number: form.check_number.trim() || null,
       sent_date: form.status === 'sent' ? (form.sent_date || new Date().toISOString().slice(0, 10)) : (form.sent_date || null),
     }
-    const { data, error } = await supabase.from('check_requests').update(payload).eq('id', request.id).select().single()
+    // Applies to every member of the group — one payment, one status/check number/sent date.
+    const ids = group.members.map(m => m.id)
+    const { data, error } = await supabase.from('check_requests').update(payload).in('id', ids).select()
     setSaving(false)
     if (error) { setError(error.message); return }
     onSaved(data)
@@ -201,36 +398,70 @@ function DetailModal({ request, categories, onClose, onSaved }) {
   }
 
   return (
-    <Modal onClose={onClose} title={request.request_number} wide>
+    <Modal onClose={onClose} title={isGroup ? `Merged Payment — ${money(total)}` : primary.request_number} wide>
       {error && <div className="alert alert-error">{error}</div>}
+
+      {isGroup && (
+        <div className="card" style={{ padding: 12, marginBottom: 16, background: '#f3e6ed' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>This payment covers {group.members.length} requests, made payable to {primary.payee_name}:</div>
+          {group.members.map(m => (
+            <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+              <span>{m.request_number} — {m.description}</span>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {money(m.amount)}
+                <button className="btn btn-secondary btn-sm" onClick={() => onUnmerge(m.id)}>Remove from group</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid-2">
         <div className="card" style={{ padding: 16 }}>
           <h3 style={{ margin: '0 0 12px', color: 'var(--burgundy)', fontSize: 15 }}>Request Details</h3>
-          <DetailRow label="Requester" value={`${request.requester_name}${request.requester_email ? ` · ${request.requester_email}` : ''}${request.requester_phone ? ` · ${request.requester_phone}` : ''}`} />
-          <DetailRow label="Payable To" value={request.payee_name} />
-          <DetailRow label="Amount" value={money(request.amount)} />
-          <DetailRow label="For" value={request.description} />
-          <DetailRow label="Requester-noted account" value={request.account_code || '—'} />
-          <DetailRow label="Request Date" value={fmtDate(request.request_date)} />
-          <DetailRow label="Needed By" value={fmtDate(request.needed_by_date)} />
-          <DetailRow label="Delivery" value={DELIVERY_LABELS[request.delivery_method] || request.delivery_method} />
-          {request.delivery_method !== 'in_person' && (
-            <DetailRow label="Mail To" value={`${request.mailing_name || ''}\n${request.mailing_address || ''}`} />
-          )}
-          <DetailRow label="Flags" value={[
-            request.is_reimbursement ? 'Reimbursement' : null,
-            request.is_vote_related ? `Vote-related${request.vote_reference ? ` — ${request.vote_reference}` : ''}` : null,
-          ].filter(Boolean).join(' · ') || '—'} />
-          <DetailRow label="Source" value={request.is_staff_entered ? 'Entered by staff' : 'Public submission'} />
+          {group.members.map(m => (
+            <div key={m.id} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: isGroup ? '1px dashed var(--gray-200)' : 'none' }}>
+              {isGroup && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>{m.request_number}</div>}
+              <DetailRow label="Requester" value={`${m.requester_name}${m.requester_email ? ` · ${m.requester_email}` : ''}${m.requester_phone ? ` · ${m.requester_phone}` : ''}`} />
+              <DetailRow label="Payable To" value={m.payee_name} />
+              <DetailRow label="Amount" value={money(m.amount)} />
+              <DetailRow label="For" value={m.description} />
+              <DetailRow label="Requester-noted account" value={m.account_code || '—'} />
+              <DetailRow label="Request Date" value={fmtDate(m.request_date)} />
+              <DetailRow label="Needed By" value={fmtDate(m.needed_by_date)} />
+              <DetailRow label="Delivery" value={DELIVERY_LABELS[m.delivery_method] || m.delivery_method} />
+              {m.delivery_method !== 'in_person' && (
+                <DetailRow label="Mail To" value={`${m.mailing_name || ''}\n${m.mailing_address || ''}`} />
+              )}
+              <DetailRow label="Flags" value={[
+                m.is_reimbursement ? 'Reimbursement' : null,
+                m.is_vote_related ? `Vote-related${m.vote_reference ? ` — ${m.vote_reference}` : ''}` : null,
+              ].filter(Boolean).join(' · ') || '—'} />
+              <DetailRow label="Source" value={m.is_staff_entered ? 'Entered by staff' : 'Public submission'} />
 
-          <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={viewBackup} disabled={fileLoading || !request.backup_file_url}>
-            {fileLoading ? 'Loading…' : '📎 View Backup Document'}
-          </button>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--gray-600)', marginBottom: 4 }}>
+                  Backup ({(filesByRequest[m.id] || []).length})
+                </div>
+                {(filesByRequest[m.id] || []).length === 0 ? (
+                  <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>No files attached</span>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(filesByRequest[m.id] || []).map(f => (
+                      <button key={f.id} className="btn btn-secondary btn-sm" onClick={() => viewFile(f)} disabled={fileLoading === f.id}>
+                        📎 {f.file_name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="card" style={{ padding: 16 }}>
           <h3 style={{ margin: '0 0 12px', color: 'var(--burgundy)', fontSize: 15 }}>Finance</h3>
+          {isGroup && <p style={{ fontSize: 12, color: 'var(--gray-400)', marginBottom: 12 }}>These apply to the whole payment — all {group.members.length} requests share one status, check number, and sent date.</p>}
 
           <div className="form-group">
             <label className="form-label">Status</label>
@@ -265,7 +496,7 @@ function DetailModal({ request, categories, onClose, onSaved }) {
           </div>
 
           <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ width: '100%', justifyContent: 'center' }}>
-            {saving ? 'Saving…' : 'Save Changes'}
+            {saving ? 'Saving…' : isGroup ? `Save Changes (${group.members.length} requests)` : 'Save Changes'}
           </button>
         </div>
       </div>
@@ -293,7 +524,7 @@ const EMPTY_NEW = {
 
 function NewRequestModal({ onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY_NEW)
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -307,16 +538,6 @@ function NewRequestModal({ onClose, onCreated }) {
     setSaving(true)
     setError('')
     try {
-      let backup_file_url = null, backup_file_name = null
-      if (file) {
-        const ext = file.name.split('.').pop()
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
-        const { error: upErr } = await supabase.storage.from(BACKUP_BUCKET).upload(path, file)
-        if (upErr) throw new Error('File upload failed: ' + upErr.message)
-        backup_file_url = path
-        backup_file_name = file.name
-      }
-
       const payload = {
         requester_name: form.requester_name.trim(),
         requester_email: form.requester_email.trim() || null,
@@ -335,11 +556,20 @@ function NewRequestModal({ onClose, onCreated }) {
         needed_by_date: form.needed_by_date,
         status: form.status,
         is_staff_entered: true,
-        backup_file_url, backup_file_name,
       }
 
       const { data, error: insErr } = await supabase.from('check_requests').insert(payload).select().single()
       if (insErr) throw new Error(insErr.message)
+
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i]
+        const ext = f.name.split('.').pop()
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: upErr } = await supabase.storage.from(BACKUP_BUCKET).upload(path, f)
+        if (upErr) throw new Error(`Upload failed for ${f.name}: ` + upErr.message)
+        await supabase.from('check_request_files').insert({ check_request_id: data.id, file_url: path, file_name: f.name, sort_order: i })
+      }
+
       onCreated(data)
     } catch (err) {
       setError(err.message)
@@ -415,8 +645,13 @@ function NewRequestModal({ onClose, onCreated }) {
       </div>
 
       <div className="form-group">
-        <label className="form-label">Backup Document (optional)</label>
-        <input type="file" accept="image/*,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} />
+        <label className="form-label">Backup Documents (optional, multiple allowed)</label>
+        <input type="file" accept="image/*,application/pdf" multiple onChange={e => setFiles(Array.from(e.target.files || []))} />
+        {files.length > 0 && (
+          <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 12, color: 'var(--gray-600)' }}>
+            {files.map((f, i) => <li key={i}>{f.name}</li>)}
+          </ul>
+        )}
       </div>
 
       <button className="btn btn-primary" onClick={handleCreate} disabled={saving} style={{ width: '100%', justifyContent: 'center' }}>
@@ -440,4 +675,138 @@ function Modal({ title, children, onClose, wide }) {
       </div>
     </div>
   )
+}
+
+// ── Combined PDF builder: cover page(s) + embedded receipts ──────────────
+async function buildCombinedPdf(unpaidGroups, filesByRequest, onProgress) {
+  const doc = await PDFDocument.create()
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  const regular = await doc.embedFont(StandardFonts.Helvetica)
+  const WINE = rgb(0.239, 0, 0.149)
+  const GRAY = rgb(0.4, 0.4, 0.4)
+
+  let i = 0
+  for (const group of unpaidGroups) {
+    i++
+    onProgress?.(`Building request ${i} of ${unpaidGroups.length}…`)
+    const members = group.members
+    const primary = members[0]
+    const total = members.reduce((s, m) => s + Number(m.amount), 0)
+
+    // ---- Cover page ----
+    const page = doc.addPage([612, 792])
+    let y = 740
+
+    page.drawText('United Methodist Church of Danielson', { x: 50, y, size: 11, font: bold, color: WINE })
+    y -= 16
+    page.drawText('Check Request', { x: 50, y, size: 20, font: bold, color: WINE })
+    y -= 34
+
+    const line = (label, value) => {
+      page.drawText(label.toUpperCase(), { x: 50, y, size: 8, font: bold, color: GRAY })
+      y -= 13
+      page.drawText(String(value ?? '—'), { x: 50, y, size: 12, font: regular, color: rgb(0, 0, 0) })
+      y -= 22
+    }
+
+    if (members.length > 1) {
+      line('Request Numbers', members.map(m => m.request_number).join(', '))
+    } else {
+      line('Request Number', primary.request_number)
+    }
+    line('Payable To', primary.payee_name)
+    line('Total Amount', money(total))
+    line('Request Date', fmtDate(primary.request_date))
+    line('Needed By', fmtDate(members.reduce((min, m) => !min || m.needed_by_date < min ? m.needed_by_date : min, null)))
+    line('Delivery', DELIVERY_LABELS[primary.delivery_method] || primary.delivery_method)
+    if (primary.delivery_method !== 'in_person') {
+      line('Mail To', `${primary.mailing_name || ''}\n${primary.mailing_address || ''}`)
+    }
+
+    y -= 6
+    page.drawText('LINE ITEMS', { x: 50, y, size: 8, font: bold, color: GRAY })
+    y -= 16
+    members.forEach(m => {
+      page.drawText(`${m.request_number} — ${m.requester_name}`, { x: 50, y, size: 10, font: bold })
+      page.drawText(money(m.amount), { x: 480, y, size: 10, font: bold })
+      y -= 13
+      const desc = (m.description || '').slice(0, 95)
+      page.drawText(desc, { x: 50, y, size: 9, font: regular, color: GRAY })
+      y -= 10
+      if (m.category) {
+        page.drawText(`Category: ${m.category}`, { x: 50, y, size: 8, font: regular, color: GRAY })
+        y -= 10
+      }
+      y -= 8
+    })
+
+    // ---- Receipts for each member request ----
+    for (const m of members) {
+      const files = filesByRequest[m.id] || []
+      for (const file of files) {
+        try {
+          const { data: signed, error: signErr } = await supabase.storage.from(BACKUP_BUCKET).createSignedUrl(file.file_url, 300)
+          if (signErr) throw signErr
+          const resp = await fetch(signed.signedUrl)
+          const bytes = await resp.arrayBuffer()
+          const lowerName = file.file_name.toLowerCase()
+
+          if (lowerName.endsWith('.pdf')) {
+            const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true })
+            const copied = await doc.copyPages(srcDoc, srcDoc.getPageIndices())
+            copied.forEach(p => doc.addPage(p))
+          } else if (lowerName.endsWith('.png')) {
+            const img = await doc.embedPng(bytes)
+            addImagePage(doc, img, `${m.request_number} — ${file.file_name}`, bold)
+          } else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+            const img = await doc.embedJpg(bytes)
+            addImagePage(doc, img, `${m.request_number} — ${file.file_name}`, bold)
+          } else {
+            const notePage = doc.addPage([612, 792])
+            notePage.drawText(`${m.request_number}: "${file.file_name}" — this file format can't be embedded automatically.`, { x: 50, y: 700, size: 11, font: regular })
+            notePage.drawText('View it directly in Planning Hub instead.', { x: 50, y: 680, size: 11, font: regular })
+          }
+        } catch (err) {
+          const notePage = doc.addPage([612, 792])
+          notePage.drawText(`${m.request_number}: couldn't load "${file.file_name}" (${err.message}).`, { x: 50, y: 700, size: 11, font: regular })
+        }
+      }
+    }
+  }
+
+  onProgress?.('Finishing up…')
+  return doc.save()
+}
+
+function triggerPdfDownload(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+// Convert PDF bytes to base64 for the email Edge Function, in chunks to avoid
+// call-stack limits on large files.
+function bytesToBase64(bytes) {
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+function addImagePage(doc, img, caption, boldFont) {
+  const page = doc.addPage([612, 792])
+  const maxW = 550, maxH = 700
+  const { width, height } = img
+  const scale = Math.min(maxW / width, maxH / height, 1)
+  const w = width * scale, h = height * scale
+  page.drawText(caption, { x: 30, y: 770, size: 9, font: boldFont, color: rgb(0.4, 0.4, 0.4) })
+  page.drawImage(img, { x: (612 - w) / 2, y: 30, width: w, height: h })
 }
