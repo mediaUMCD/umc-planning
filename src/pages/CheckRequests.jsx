@@ -37,11 +37,24 @@ function StatusBadge({ status }) {
   )
 }
 
+function FundBadge({ fund }) {
+  const isMissions = fund === 'missions'
+  return (
+    <span style={{
+      background: isMissions ? '#e6f0f4' : '#f0ede8', color: isMissions ? '#2d6a8f' : '#666',
+      padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+    }}>
+      {isMissions ? 'Missions' : 'General'}
+    </span>
+  )
+}
+
 export default function CheckRequests() {
   const [requests, setRequests] = useState([])
   const [filesByRequest, setFilesByRequest] = useState({}) // { [request_id]: [file, ...] }
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('active')
+  const [fundFilter, setFundFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState(null)       // group object being viewed/edited
   const [showNew, setShowNew] = useState(false)
@@ -98,6 +111,7 @@ export default function CheckRequests() {
     let list = groups
     if (statusFilter === 'active') list = list.filter(g => g.members.some(m => UNPAID_STATUSES.includes(m.status)))
     else if (statusFilter !== 'all') list = list.filter(g => g.members.every(m => m.status === statusFilter))
+    if (fundFilter !== 'all') list = list.filter(g => g.members.some(m => m.fund === fundFilter))
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(g => g.members.some(m =>
@@ -108,7 +122,7 @@ export default function CheckRequests() {
       ))
     }
     return list
-  }, [groups, statusFilter, search])
+  }, [groups, statusFilter, fundFilter, search])
 
   function upsertLocal(updatedRequests) {
     setRequests(prev => prev.map(r => {
@@ -138,6 +152,9 @@ export default function CheckRequests() {
 
   async function mergeSelected() {
     if (selectedIds.size < 2) return
+    const selectedRequests = requests.filter(r => selectedIds.has(r.id))
+    const funds = new Set(selectedRequests.map(r => r.fund))
+    if (funds.size > 1) { setError('Can\u2019t merge General and Missions requests into one payment — they\u2019re tracked separately.'); return }
     setMerging(true)
     setError('')
     const groupId = crypto.randomUUID()
@@ -260,6 +277,15 @@ export default function CheckRequests() {
               </button>
             ))}
           </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['all', 'All Funds'], ['general', 'General'], ['missions', 'Missions']].map(([val, label]) => (
+              <button key={val}
+                className={`btn btn-sm ${fundFilter === val ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFundFilter(val)}>
+                {label}
+              </button>
+            ))}
+          </div>
           <input
             className="form-input" placeholder="Search request #, name, description…"
             value={search} onChange={e => setSearch(e.target.value)}
@@ -289,6 +315,7 @@ export default function CheckRequests() {
                 <tr>
                   <th></th>
                   <th>Request #</th>
+                  <th>Fund</th>
                   <th>Date</th>
                   <th>Requester</th>
                   <th>Payee</th>
@@ -305,6 +332,7 @@ export default function CheckRequests() {
                   const allChecked = g.members.every(m => selectedIds.has(m.id))
                   const someChecked = g.members.some(m => selectedIds.has(m.id))
                   const statuses = [...new Set(g.members.map(m => m.status))]
+                  const funds = [...new Set(g.members.map(m => m.fund))]
                   return (
                     <tr key={g.groupId || primary.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(g)}>
                       <td onClick={e => e.stopPropagation()}>
@@ -314,6 +342,11 @@ export default function CheckRequests() {
                       <td style={{ fontWeight: 600 }}>
                         {isGroup ? `${g.members.length} requests` : primary.request_number}
                         {isGroup && <div style={{ fontSize: 11, color: 'var(--gray-400)', fontWeight: 400 }}>{g.members.map(m => m.request_number).join(', ')}</div>}
+                      </td>
+                      <td>
+                        {funds.length === 1
+                          ? <FundBadge fund={funds[0]} />
+                          : <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>Mixed</span>}
                       </td>
                       <td>{fmtDate(primary.request_date)}</td>
                       <td>{isGroup ? [...new Set(g.members.map(m => m.requester_name))].join(', ') : primary.requester_name}</td>
@@ -424,6 +457,7 @@ function DetailModal({ group, categories, filesByRequest, onClose, onSaved, onUn
               {isGroup && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>{m.request_number}</div>}
               <DetailRow label="Requester" value={`${m.requester_name}${m.requester_email ? ` · ${m.requester_email}` : ''}${m.requester_phone ? ` · ${m.requester_phone}` : ''}`} />
               <DetailRow label="Payable To" value={m.payee_name} />
+              <DetailRow label="Fund" value={m.fund === 'missions' ? 'Missions' : 'General'} />
               <DetailRow label="Amount" value={money(m.amount)} />
               <DetailRow label="For" value={m.description} />
               <DetailRow label="Requester-noted account" value={m.account_code || '—'} />
@@ -516,7 +550,7 @@ function DetailRow({ label, value }) {
 // ── Staff manual-entry modal ─────────────────────────────────────────────
 const EMPTY_NEW = {
   requester_name: '', requester_email: '', requester_phone: '',
-  payee_name: '', amount: '', description: '', account_code: '', category: '',
+  payee_name: '', fund: 'general', amount: '', description: '', account_code: '', category: '',
   is_reimbursement: false, is_vote_related: false, vote_reference: '',
   delivery_method: 'in_person', mailing_name: '', mailing_address: '',
   needed_by_date: '', status: 'submitted',
@@ -543,6 +577,7 @@ function NewRequestModal({ onClose, onCreated }) {
         requester_email: form.requester_email.trim() || null,
         requester_phone: form.requester_phone.trim() || null,
         payee_name: form.payee_name.trim(),
+        fund: form.fund,
         amount: Number(form.amount),
         description: form.description.trim(),
         account_code: form.account_code.trim() || null,
@@ -591,6 +626,12 @@ function NewRequestModal({ onClose, onCreated }) {
 
       <div className="form-group"><label className="form-label">Payable To *</label>
         <input className="form-input" value={form.payee_name} onChange={e => set('payee_name', e.target.value)} /></div>
+
+      <div className="form-group"><label className="form-label">Fund *</label>
+        <select className="form-select" value={form.fund} onChange={e => set('fund', e.target.value)}>
+          <option value="general">General</option>
+          <option value="missions">Missions</option>
+        </select></div>
 
       <div className="grid-2">
         <div className="form-group"><label className="form-label">Amount *</label>
