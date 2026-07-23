@@ -1,8 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import ExcelJS from 'exceljs'
 
 const BACKUP_BUCKET = 'check-request-backup'
+
+const PAYMENT_METHOD_LABELS = {
+  online: 'On line', check: 'Check', debit: 'Debit', bill_pay: 'Bill Pay', other: 'Other',
+}
 
 const STATUS_LABELS = {
   submitted: 'Submitted',
@@ -63,8 +68,103 @@ export default function CheckRequests() {
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState('')
   const [error, setError] = useState('')
+  const [showLogDeposit, setShowLogDeposit] = useState(false)
+  const [exportingRegister, setExportingRegister] = useState(null) // 'general' | 'missions' | null
 
   useEffect(() => { load() }, [])
+
+  async function exportRegister(fund) {
+    setExportingRegister(fund)
+    setError('')
+    try {
+      const { data: paidRequests, error: reqErr } = await supabase
+        .from('check_requests')
+        .select('*')
+        .eq('fund', fund)
+        .eq('status', 'sent')
+        .order('sent_date')
+      if (reqErr) throw new Error(reqErr.message)
+
+      let depositRows = []
+      let transferRows = []
+      if (fund === 'general') {
+        const { data: deposits, error: depErr } = await supabase.from('general_fund_deposits').select('*').order('entry_date')
+        if (depErr) throw new Error(depErr.message)
+        depositRows = (deposits || []).map(d => ({
+          date: d.entry_date, pmt: '', reqNum: '', vendor: 'DEPOSIT', purchase: '',
+          amt: null, chargeTo: '', depAmt: Number(d.amount), notes: [d.source, d.notes].filter(Boolean).join(' — '),
+        }))
+      } else {
+        const { data: ledger, error: ledErr } = await supabase.from('missions_ledger').select('*, budget_categories(name)').order('entry_date')
+        if (ledErr) throw new Error(ledErr.message)
+        depositRows = (ledger || []).filter(e => e.type === 'income').map(e => ({
+          date: e.entry_date, pmt: '', reqNum: '', vendor: 'DEPOSIT', purchase: e.description,
+          amt: null, chargeTo: '', depAmt: Number(e.amount), notes: e.source || '',
+        }))
+        transferRows = (ledger || []).filter(e => e.type === 'transfer_out').map(e => ({
+          date: e.entry_date, pmt: '', reqNum: '', vendor: 'TRANSFER TO GENERAL FUND', purchase: e.description,
+          amt: Number(e.amount), chargeTo: e.budget_categories?.name || '', depAmt: null, notes: '',
+        }))
+      }
+
+      const checkRows = (paidRequests || []).map(r => ({
+        date: r.sent_date || r.request_date,
+        pmt: PAYMENT_METHOD_LABELS[r.payment_method] || (r.check_number ? 'Check' : ''),
+        reqNum: r.request_number,
+        vendor: r.payee_name,
+        purchase: r.description,
+        amt: Number(r.amount),
+        chargeTo: r.category || '',
+        depAmt: null,
+        notes: r.check_number ? `ck#${r.check_number}` : '',
+      }))
+
+      const allRows = [...checkRows, ...transferRows, ...depositRows]
+        .filter(r => r.date)
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+      const wb = new ExcelJS.Workbook()
+      const ws = wb.addWorksheet(fund === 'general' ? 'General Register' : 'Missions Register')
+      ws.columns = [
+        { header: 'Date', key: 'date', width: 12 },
+        { header: 'Pmt', key: 'pmt', width: 10 },
+        { header: 'Req #', key: 'reqNum', width: 8 },
+        { header: 'Vendor', key: 'vendor', width: 24 },
+        { header: 'Purchase', key: 'purchase', width: 30 },
+        { header: 'Amt', key: 'amt', width: 12 },
+        { header: 'Charge to', key: 'chargeTo', width: 18 },
+        { header: 'Dep Amt', key: 'depAmt', width: 12 },
+        { header: 'Notes', key: 'notes', width: 22 },
+      ]
+      ws.getRow(1).font = { bold: true }
+      ws.getRow(1).eachCell(cell => { cell.border = { bottom: { style: 'thin' } } })
+
+      allRows.forEach(r => {
+        const row = ws.addRow({
+          date: r.date ? new Date(r.date + 'T12:00:00') : null,
+          pmt: r.pmt, reqNum: r.reqNum, vendor: r.vendor, purchase: r.purchase,
+          amt: r.amt, chargeTo: r.chargeTo, depAmt: r.depAmt, notes: r.notes,
+        })
+        row.getCell('date').numFmt = 'm/d/yyyy'
+        if (r.amt != null) row.getCell('amt').numFmt = '$#,##0.00'
+        if (r.depAmt != null) row.getCell('depAmt').numFmt = '$#,##0.00'
+      })
+
+      const buf = await wb.xlsx.writeBuffer()
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${fund}-register-${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError('Export failed: ' + err.message)
+    }
+    setExportingRegister(null)
+  }
 
   async function load() {
     setLoading(true)
@@ -246,6 +346,16 @@ export default function CheckRequests() {
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginBottom: 12, flexWrap: 'wrap' }}>
+        <button className="btn btn-secondary btn-sm" onClick={() => setShowLogDeposit(true)}>+ Log General Deposit</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => exportRegister('general')} disabled={exportingRegister === 'general'}>
+          {exportingRegister === 'general' ? 'Exporting…' : '📊 Export General Register'}
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => exportRegister('missions')} disabled={exportingRegister === 'missions'}>
+          {exportingRegister === 'missions' ? 'Exporting…' : '📊 Export Missions Register'}
+        </button>
+      </div>
+
       {showEmailPrompt && (
         <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <label className="form-label" style={{ marginBottom: 0 }}>Send to:</label>
@@ -382,6 +492,10 @@ export default function CheckRequests() {
           onCreated={(r) => { setRequests(prev => [r, ...prev]); setShowNew(false) }}
         />
       )}
+
+      {showLogDeposit && (
+        <LogDepositModal onClose={() => setShowLogDeposit(false)} onLogged={() => setShowLogDeposit(false)} />
+      )}
     </div>
   )
 }
@@ -395,6 +509,7 @@ function DetailModal({ group, categories, filesByRequest, onClose, onSaved, onUn
   const [form, setForm] = useState({
     status: primary.status,
     category: primary.category || '',
+    payment_method: primary.payment_method || '',
     finance_notes: primary.finance_notes || '',
     check_number: primary.check_number || '',
     sent_date: primary.sent_date || '',
@@ -417,6 +532,7 @@ function DetailModal({ group, categories, filesByRequest, onClose, onSaved, onUn
     const payload = {
       status: form.status,
       category: form.category.trim() || null,
+      payment_method: form.payment_method || null,
       finance_notes: form.finance_notes.trim() || null,
       check_number: form.check_number.trim() || null,
       sent_date: form.status === 'sent' ? (form.sent_date || new Date().toISOString().slice(0, 10)) : (form.sent_date || null),
@@ -512,6 +628,14 @@ function DetailModal({ group, categories, filesByRequest, onClose, onSaved, onUn
             <datalist id="qb-categories">
               {categories.map(c => <option key={c} value={c} />)}
             </datalist>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Payment Method</label>
+            <select className="form-select" value={form.payment_method} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}>
+              <option value="">Select…</option>
+              {Object.entries(PAYMENT_METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
           </div>
 
           <div className="form-group">
@@ -715,6 +839,53 @@ function Modal({ title, children, onClose, wide }) {
         {children}
       </div>
     </div>
+  )
+}
+
+// ── Log a General Fund deposit ────────────────────────────────────────────
+function LogDepositModal({ onClose, onLogged }) {
+  const [amount, setAmount] = useState('')
+  const [source, setSource] = useState('')
+  const [notes, setNotes] = useState('')
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSave() {
+    if (!amount || Number(amount) <= 0) { setError('Please enter an amount.'); return }
+    setSaving(true); setError('')
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('general_fund_deposits').insert({
+      entry_date: entryDate, amount: Number(amount), source: source.trim() || null, notes: notes.trim() || null, created_by: user.id,
+    })
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    onLogged()
+  }
+
+  return (
+    <Modal title="Log General Fund Deposit" onClose={onClose}>
+      {error && <div className="alert alert-error">{error}</div>}
+      <div className="form-group">
+        <label className="form-label">Amount *</label>
+        <input type="number" step="0.01" className="form-input" value={amount} onChange={e => setAmount(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Source</label>
+        <input className="form-input" value={source} onChange={e => setSource(e.target.value)} placeholder="e.g. From trustee acct, BofA" />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Notes</label>
+        <input className="form-input" value={notes} onChange={e => setNotes(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Date</label>
+        <input type="date" className="form-input" value={entryDate} onChange={e => setEntryDate(e.target.value)} />
+      </div>
+      <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ width: '100%', justifyContent: 'center' }}>
+        {saving ? 'Saving…' : 'Log Deposit'}
+      </button>
+    </Modal>
   )
 }
 
