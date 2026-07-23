@@ -101,12 +101,20 @@ export default function UploadTracker() {
   const [importResult, setImportResult] = useState(null)
   const [userEmail, setUserEmail] = useState(null)
   const [sendingApproval, setSendingApproval] = useState(null) // `${serviceId}-${contentType}` while in flight
+  const [importHistory, setImportHistory] = useState([])
+  const [showImportHistory, setShowImportHistory] = useState(false)
   const fileInputRef = useRef(null)
 
   useEffect(() => { loadData() }, [filter])
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data?.user?.email || null))
+    loadImportHistory()
   }, [])
+
+  async function loadImportHistory() {
+    const { data } = await supabase.from('import_log').select('*').order('run_at', { ascending: false }).limit(20)
+    setImportHistory(data || [])
+  }
 
   async function loadData() {
     setLoading(true)
@@ -316,11 +324,20 @@ export default function UploadTracker() {
           await supabase.from('service_dates').update(recapPatch).eq('id', svc.id)
         }
 
-       if (trackerPatches.length > 0 || Object.keys(recapPatch).length > 0) updated++
+        if (trackerPatches.length > 0 || Object.keys(recapPatch).length > 0) updated++
         else noChanges.push(dateStr)
       }
 
       setImportResult({ updated, skipped, noChanges, total: rows.length })
+      await supabase.from('import_log').insert([{
+        file_name: file.name,
+        run_by_email: userEmail,
+        updated_count: updated,
+        skipped_count: skipped.length,
+        no_changes_count: noChanges.length,
+        total_rows: rows.length,
+      }])
+      loadImportHistory()
       await loadData()
     } catch (err) {
       console.error(err)
@@ -354,8 +371,37 @@ export default function UploadTracker() {
             {importing ? 'Importing…' : '⬆ Import Spreadsheet'}
           </button>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={handleImportFile} />
+          <button className="btn btn-secondary" onClick={() => setShowImportHistory(s => !s)}>
+            🕓 Import History
+          </button>
         </div>
       </div>
+
+      {showImportHistory && (
+        <div style={{ margin: '0 28px 16px' }} className="card">
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '10px' }}>Recent Imports</div>
+          {importHistory.length === 0 ? (
+            <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>No imports logged yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {importHistory.map(run => (
+                <div key={run.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--gray-50)', borderRadius: '6px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ fontWeight: 600 }}>{new Date(run.run_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                    {run.file_name && <span style={{ color: 'var(--gray-400)' }}> — {run.file_name}</span>}
+                    {run.run_by_email && <span style={{ color: 'var(--gray-400)' }}> · {run.run_by_email}</span>}
+                  </div>
+                  <div style={{ color: 'var(--gray-600)' }}>
+                    ✓ {run.updated_count} updated
+                    {run.no_changes_count > 0 && <span style={{ color: 'var(--gray-400)' }}> · {run.no_changes_count} no changes</span>}
+                    {run.skipped_count > 0 && <span style={{ color: 'var(--danger)' }}> · {run.skipped_count} skipped</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {importResult && (
         <div style={{ margin: '0 28px' }}>
