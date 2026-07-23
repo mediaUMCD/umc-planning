@@ -10,6 +10,7 @@ import BulletinImport from './pages/BulletinImport.jsx'
 import BulletinSettings from './pages/BulletinSettings.jsx'
 import PhotoManager from './pages/PhotoManager.jsx'
 import CheckRequests from './pages/CheckRequests.jsx'
+import Fundraising from './pages/Fundraising.jsx'
 import Approve from './pages/Approve.jsx'
 import SetList from './pages/SetList.jsx'
 import Sidebar from './components/Sidebar.jsx'
@@ -56,6 +57,7 @@ export default function App() {
 
   const isAdmin = roles.includes('admin')
   const isFinanceOnly = roles.includes('finance') && !isAdmin
+  const canFundraising = isAdmin || roles.includes('fundraising')
 
   // Finance-only logins are scoped to just Check Requests, everywhere else.
   useEffect(() => {
@@ -108,13 +110,14 @@ export default function App() {
       case 'bulletin-settings': return <BulletinSettings />
       case 'photos': return <PhotoManager />
       case 'check-requests': return <CheckRequests />
+      case 'fundraising': return canFundraising ? <Fundraising /> : <Dashboard navigate={setPage} />
       default: return <Dashboard navigate={setPage} />
     }
   }
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} navigate={setPage} session={session} isFinanceOnly={isFinanceOnly} />
+      <Sidebar page={page} navigate={setPage} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} />
       <div className="main-content">
         {renderPage()}
       </div>

@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { id: 'check-requests', icon: '/icons/icon-upload-tracker.png', label: 'Check Requests' },
 ]
 
+const FUNDRAISING_ITEM = { id: 'fundraising', icon: '💰', label: 'Fundraising' }
+
 const FINANCE_ONLY_NAV_ITEMS = [
   { id: 'check-requests', icon: '/icons/icon-upload-tracker.png', label: 'Check Requests' },
 ]
@@ -22,12 +24,14 @@ const OTHER_APPS = [
   { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
 
-export default function Sidebar({ page, navigate, session, isFinanceOnly }) {
+export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising }) {
   async function handleLogout() {
     await supabase.auth.signOut()
   }
 
-  const items = isFinanceOnly ? FINANCE_ONLY_NAV_ITEMS : NAV_ITEMS
+  const items = isFinanceOnly
+    ? FINANCE_ONLY_NAV_ITEMS
+    : canFundraising ? [...NAV_ITEMS, FUNDRAISING_ITEM] : NAV_ITEMS
 
   return (
     <div className="sidebar">
@@ -58,7 +62,11 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly }) {
               transition: 'all 0.15s',
             }}
           >
-            <img src={item.icon} alt="" style={{ width: '20px', height: '20px', flexShrink: 0 }} />
+            {item.icon.startsWith('/') ? (
+              <img src={item.icon} alt="" style={{ width: '20px', height: '20px', flexShrink: 0 }} />
+            ) : (
+              <span style={{ fontSize: '17px', width: '20px', textAlign: 'center', flexShrink: 0 }}>{item.icon}</span>
+            )}
             {item.label}
           </button>
         ))}
@@ -75,7 +83,7 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly }) {
             Other Apps
           </div>
           {OTHER_APPS.map(app => (
-            <a
+            
               key={app.href}
               href={app.href}
               target="_blank"

@@ -1,0 +1,488 @@
+import { useState, useEffect, useMemo } from 'react'
+import { supabase } from '../lib/supabase.js'
+
+const BUCKET = 'fundraising-images'
+
+const FUND_SOURCES = [
+  { value: 'general', label: 'Church General Fund' },
+  { value: 'missions', label: 'Missions Fund' },
+  { value: 'other', label: 'Other / Small Business' },
+]
+const FUND_LABEL = Object.fromEntries(FUND_SOURCES.map(f => [f.value, f.label]))
+
+const TX_TYPES = [
+  { value: 'sale', label: 'Sale (money in)' },
+  { value: 'donation', label: 'Donation (money in)' },
+  { value: 'purchase', label: 'Purchase (money out)' },
+  { value: 'adjustment', label: 'Adjustment' },
+]
+const TX_COLORS = {
+  sale: { bg: '#e6f4ea', fg: '#2d7a4f' },
+  donation: { bg: '#e6f4ea', fg: '#2d7a4f' },
+  purchase: { bg: '#fdecea', fg: '#c0392b' },
+  adjustment: { bg: '#eee', fg: '#555' },
+}
+
+const money = (n) => Number(n || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const fmtDate = (d) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+
+async function uploadToStorage(file) {
+  const ext = file.name.split('.').pop()
+  const fileName = `${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from(BUCKET).upload(fileName, file, { cacheControl: '3600', upsert: false })
+  if (error) throw error
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName)
+  return data.publicUrl
+}
+
+export default function Fundraising() {
+  const [tab, setTab] = useState('inventory') // 'inventory' | 'ledger'
+  const [products, setProducts] = useState([])
+  const [transactions, setTransactions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const [showProductForm, setShowProductForm] = useState(false)
+  const [editingProduct, setEditingProduct] = useState(null) // null = add mode
+  const [showTxForm, setShowTxForm] = useState(false)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    setError('')
+    const { data: prods, error: pErr } = await supabase.from('fundraising_products').select('*').order('name', { ascending: true })
+    if (pErr) { setError(pErr.message); setLoading(false); return }
+    setProducts(prods || [])
+
+    const { data: txs, error: tErr } = await supabase.from('fundraising_transactions').select('*').order('transaction_date', { ascending: false }).order('created_at', { ascending: false })
+    if (tErr) { setError(tErr.message); setLoading(false); return }
+    setTransactions(txs || [])
+    setLoading(false)
+  }
+
+  const summary = useMemo(() => {
+    const inventoryValue = products.reduce((s, p) => s + Number(p.cost || 0) * Number(p.quantity_on_hand || 0), 0)
+    const moneyIn = transactions.filter(t => t.type === 'sale' || t.type === 'donation').reduce((s, t) => s + Number(t.amount || 0), 0)
+    const moneyOut = transactions.filter(t => t.type === 'purchase').reduce((s, t) => s + Number(t.amount || 0), 0)
+    const adjustments = transactions.filter(t => t.type === 'adjustment').reduce((s, t) => s + Number(t.amount || 0), 0)
+    return { inventoryValue, moneyIn, moneyOut, adjustments, net: moneyIn - moneyOut + adjustments }
+  }, [products, transactions])
+
+  function openAddProduct() {
+    setEditingProduct(null)
+    setShowProductForm(true)
+  }
+  function openEditProduct(p) {
+    setEditingProduct(p)
+    setShowProductForm(true)
+  }
+  async function handleDeleteProduct(id) {
+    if (!confirm('Delete this product? This does not delete past transactions tied to it.')) return
+    await supabase.from('fundraising_products').delete().eq('id', id)
+    load()
+  }
+
+  async function handleDeleteTx(id) {
+    if (!confirm('Delete this transaction? This does not undo any inventory change it made.')) return
+    await supabase.from('fundraising_transactions').delete().eq('id', id)
+    load()
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Fundraising</h1>
+          <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+            <button
+              className={tab === 'inventory' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+              onClick={() => setTab('inventory')}
+            >Inventory</button>
+            <button
+              className={tab === 'ledger' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+              onClick={() => setTab('ledger')}
+            >Money In / Out</button>
+          </div>
+        </div>
+        {tab === 'inventory' ? (
+          <button className="btn btn-primary" onClick={openAddProduct}>+ Add Product</button>
+        ) : (
+          <button className="btn btn-primary" onClick={() => setShowTxForm(true)}>+ Log Transaction</button>
+        )}
+      </div>
+
+      <div className="page-body">
+        {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
+
+        {/* Summary strip */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+          <SummaryCard label="Inventory Value (cost)" value={money(summary.inventoryValue)} />
+          <SummaryCard label="Money In" value={money(summary.moneyIn)} tone="good" />
+          <SummaryCard label="Money Out" value={money(summary.moneyOut)} tone="bad" />
+          <SummaryCard label="Net" value={money(summary.net)} tone={summary.net >= 0 ? 'good' : 'bad'} />
+        </div>
+
+        {loading ? <div className="spinner" /> : tab === 'inventory' ? (
+          <InventoryGrid products={products} onEdit={openEditProduct} onDelete={handleDeleteProduct} />
+        ) : (
+          <LedgerTable transactions={transactions} products={products} onDelete={handleDeleteTx} />
+        )}
+      </div>
+
+      {showProductForm && (
+        <ProductFormModal
+          product={editingProduct}
+          onClose={() => setShowProductForm(false)}
+          onSaved={() => { setShowProductForm(false); load() }}
+        />
+      )}
+      {showTxForm && (
+        <TransactionFormModal
+          products={products}
+          onClose={() => setShowTxForm(false)}
+          onSaved={() => { setShowTxForm(false); load() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function SummaryCard({ label, value, tone }) {
+  const color = tone === 'good' ? 'var(--burgundy)' : tone === 'bad' ? 'var(--danger)' : 'var(--gray-800)'
+  return (
+    <div className="card" style={{ textAlign: 'center', padding: '14px' }}>
+      <div style={{ fontSize: '20px', fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>{label}</div>
+    </div>
+  )
+}
+
+// ── Inventory ──────────────────────────────────────────────────────────
+function InventoryGrid({ products, onEdit, onDelete }) {
+  if (products.length === 0) {
+    return <div className="empty-state"><div className="icon">💰</div><p>No fundraising products yet. Add one above.</p></div>
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px' }}>
+      {products.map(p => {
+        const margin = Number(p.sale_price || 0) - Number(p.cost || 0)
+        return (
+          <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ aspectRatio: '4/3', background: 'var(--gray-100)' }}>
+              {p.image_url ? (
+                <img src={p.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '32px', color: 'var(--gray-200)' }}>🖼️</div>
+              )}
+            </div>
+            <div style={{ padding: '12px 14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--gray-800)' }}>{p.name}</div>
+                {p.is_public && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--burgundy)', background: 'var(--burgundy-light)', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>PUBLIC</span>}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '2px' }}>{FUND_LABEL[p.fund_source] || p.fund_source}</div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', fontSize: '12px' }}>
+                <span style={{ color: 'var(--gray-600)' }}>Cost {money(p.cost)}</span>
+                <span style={{ color: 'var(--gray-600)' }}>Sells {money(p.sale_price)}</span>
+              </div>
+              <div style={{ fontSize: '11px', color: margin >= 0 ? 'var(--gray-400)' : 'var(--danger)', marginTop: '2px' }}>
+                Margin {money(margin)} / item
+              </div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: p.quantity_on_hand <= 0 ? 'var(--danger)' : 'var(--gray-800)', marginTop: '8px' }}>
+                {p.quantity_on_hand} in stock
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => onEdit(p)}>Edit</button>
+                <button className="btn btn-danger btn-sm" onClick={() => onDelete(p.id)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ProductFormModal({ product, onClose, onSaved }) {
+  const isEdit = !!product
+  const [name, setName] = useState(product?.name || '')
+  const [description, setDescription] = useState(product?.description || '')
+  const [cost, setCost] = useState(product?.cost ?? '')
+  const [salePrice, setSalePrice] = useState(product?.sale_price ?? '')
+  const [fundSource, setFundSource] = useState(product?.fund_source || 'general')
+  const [vendor, setVendor] = useState(product?.vendor || '')
+  const [quantity, setQuantity] = useState(product?.quantity_on_hand ?? 0)
+  const [isPublic, setIsPublic] = useState(product?.is_public || false)
+  const [imageFile, setImageFile] = useState(null)
+  const [imagePreview, setImagePreview] = useState(product?.image_url || null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function handleImageChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      let imageUrl = product?.image_url || null
+      if (imageFile) imageUrl = await uploadToStorage(imageFile)
+
+      const payload = {
+        name,
+        description: description || null,
+        cost: Number(cost) || 0,
+        sale_price: Number(salePrice) || 0,
+        fund_source: fundSource,
+        vendor: vendor || null,
+        quantity_on_hand: Number(quantity) || 0,
+        is_public: isPublic,
+        image_url: imageUrl,
+      }
+
+      const { error: err } = isEdit
+        ? await supabase.from('fundraising_products').update(payload).eq('id', product.id)
+        : await supabase.from('fundraising_products').insert([payload])
+      if (err) throw err
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title={isEdit ? 'Edit Product' : 'Add Product'} onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label className="form-label">Name</label>
+          <input className="form-input" value={name} onChange={e => setName(e.target.value)} required />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Description</label>
+          <textarea className="form-input" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Cost (per item)</label>
+            <input className="form-input" type="number" step="0.01" min="0" value={cost} onChange={e => setCost(e.target.value)} required />
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Sale Price</label>
+            <input className="form-input" type="number" step="0.01" min="0" value={salePrice} onChange={e => setSalePrice(e.target.value)} required />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Fund Source</label>
+            <select className="form-select" value={fundSource} onChange={e => setFundSource(e.target.value)}>
+              {FUND_SOURCES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Quantity on Hand</label>
+            <input className="form-input" type="number" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} required />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Vendor / Source (optional)</label>
+          <input className="form-input" value={vendor} onChange={e => setVendor(e.target.value)} placeholder="e.g. purchased from [small business name]" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Photo</label>
+          <input type="file" accept="image/*" onChange={handleImageChange} style={{ fontSize: '13px' }} />
+          {imagePreview && <img src={imagePreview} alt="" style={{ width: '100%', maxWidth: '200px', borderRadius: '8px', marginTop: '6px', display: 'block' }} />}
+        </div>
+        <label className="checkbox-label" style={{ marginBottom: '10px' }}>
+          <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
+          Show on the public website fundraising page
+        </label>
+
+        {error && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{error}</div>}
+
+        <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={saving}>
+          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Product'}
+        </button>
+      </form>
+    </Modal>
+  )
+}
+
+// ── Ledger ─────────────────────────────────────────────────────────────
+function LedgerTable({ transactions, products, onDelete }) {
+  const productName = (id) => products.find(p => p.id === id)?.name || '—'
+
+  if (transactions.length === 0) {
+    return <div className="empty-state"><div className="icon">🧾</div><p>No transactions logged yet.</p></div>
+  }
+  return (
+    <div className="card">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Product</th>
+            <th>Fund Source</th>
+            <th>Amount</th>
+            <th>Note</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {transactions.map(t => {
+            const c = TX_COLORS[t.type] || TX_COLORS.adjustment
+            return (
+              <tr key={t.id}>
+                <td>{fmtDate(t.transaction_date)}</td>
+                <td>
+                  <span style={{ background: c.bg, color: c.fg, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                    {TX_TYPES.find(x => x.value === t.type)?.label.split(' (')[0] || t.type}
+                  </span>
+                </td>
+                <td>{t.product_id ? productName(t.product_id) : '—'}</td>
+                <td style={{ fontSize: '13px', color: 'var(--gray-600)' }}>{FUND_LABEL[t.fund_source] || t.fund_source}</td>
+                <td style={{ fontWeight: 700 }}>{money(t.amount)}</td>
+                <td style={{ fontSize: '13px', color: 'var(--gray-600)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.note}</td>
+                <td>
+                  <button onClick={() => onDelete(t.id)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '13px' }}>✕</button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function TransactionFormModal({ products, onClose, onSaved }) {
+  const [type, setType] = useState('sale')
+  const [amount, setAmount] = useState('')
+  const [fundSource, setFundSource] = useState('general')
+  const [productId, setProductId] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [note, setNote] = useState('')
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const payload = {
+        type,
+        amount: Number(amount),
+        fund_source: fundSource,
+        product_id: productId || null,
+        quantity: quantity ? Number(quantity) : null,
+        note: note || null,
+        transaction_date: date,
+        created_by: user?.id || null,
+      }
+      const { error: err } = await supabase.from('fundraising_transactions').insert([payload])
+      if (err) throw err
+
+      // Keep inventory in sync when a transaction is tied to a product + quantity
+      if (productId && quantity) {
+        const product = products.find(p => p.id === productId)
+        if (product) {
+          const delta = type === 'sale' ? -Number(quantity) : type === 'purchase' ? Number(quantity) : 0
+          if (delta !== 0) {
+            await supabase.from('fundraising_products')
+              .update({ quantity_on_hand: Math.max(0, Number(product.quantity_on_hand || 0) + delta) })
+              .eq('id', productId)
+          }
+        }
+      }
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title="Log Transaction" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label className="form-label">Type</label>
+          <select className="form-select" value={type} onChange={e => setType(e.target.value)}>
+            {TX_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Amount</label>
+            <input className="form-input" type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} required />
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Date</label>
+            <input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)} required />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Fund Source</label>
+          <select className="form-select" value={fundSource} onChange={e => setFundSource(e.target.value)}>
+            {FUND_SOURCES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Product (optional)</label>
+            <select className="form-select" value={productId} onChange={e => setProductId(e.target.value)}>
+              <option value="">— None —</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Quantity (optional)</label>
+            <input className="form-input" type="number" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} disabled={!productId} />
+          </div>
+        </div>
+        {productId && quantity && (
+          <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '-8px', marginBottom: '10px' }}>
+            {type === 'sale' && `This will reduce inventory by ${quantity}.`}
+            {type === 'purchase' && `This will add ${quantity} to inventory.`}
+          </div>
+        )}
+        <div className="form-group">
+          <label className="form-label">Note</label>
+          <textarea className="form-input" rows={2} value={note} onChange={e => setNote(e.target.value)} />
+        </div>
+
+        {error && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{error}</div>}
+
+        <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={saving}>
+          {saving ? 'Saving…' : 'Log Transaction'}
+        </button>
+      </form>
+    </Modal>
+  )
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '40px 16px' }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: 'white', borderRadius: 14, padding: 24, width: '100%', maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0, color: 'var(--burgundy)', fontFamily: 'var(--font-display)', fontSize: 20 }}>{title}</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--gray-400)' }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
