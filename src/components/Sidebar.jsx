@@ -83,7 +83,7 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
             Other Apps
           </div>
           {OTHER_APPS.map(app => (
-            
+            <a
               key={app.href}
               href={app.href}
               target="_blank"
