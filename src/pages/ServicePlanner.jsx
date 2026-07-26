@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 import { getSundayNumber } from '../lib/sundayNumber.js'
@@ -147,7 +147,53 @@ function buildBibleGatewayUrl(reference, version) {
 
 function truncate(text, n) {
   if (!text) return ''
-  return text.length > n ? text.slice(0, n).trim() + '…' : text
+  const plain = text.replace(/<[^>]+>/g, '') // strip formatting for this plain-text snippet
+  return plain.length > n ? plain.slice(0, n).trim() + '…' : plain
+}
+
+// A minimal rich-text box with just a Bold toggle — for Call to Worship,
+// Offertory, and Call & Response text, since these get copy-pasted straight
+// into Canva bulletin templates and the bold needs to survive that paste
+// (a plain <textarea> can't hold formatting at all).
+function RichTextArea({ value, onChange, placeholder, minHeight = 140 }) {
+  const ref = useRef(null)
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (ref.current && !focused && ref.current.innerHTML !== (value || '')) {
+      ref.current.innerHTML = value || ''
+    }
+  }, [value, focused])
+
+  function toggleBold() {
+    ref.current?.focus()
+    document.execCommand('bold')
+    onChange(ref.current.innerHTML)
+  }
+
+  return (
+    <div>
+      <style>{`.rich-textarea:empty:before { content: attr(data-placeholder); color: var(--gray-400); }`}</style>
+      <button type="button" onMouseDown={e => e.preventDefault()} onClick={toggleBold} title="Bold"
+        style={{ width: 30, height: 26, fontWeight: 800, fontSize: 13, border: '1px solid var(--gray-200)', borderRadius: '6px 6px 0 0', borderBottom: 'none', background: 'var(--gray-50)', cursor: 'pointer', color: 'var(--gray-700)' }}>
+        B
+      </button>
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onInput={() => onChange(ref.current.innerHTML)}
+        data-placeholder={placeholder}
+        className="rich-textarea"
+        style={{
+          minHeight, border: '1px solid var(--gray-200)', borderRadius: '0 8px 8px 8px',
+          padding: '10px 12px', fontSize: 14, lineHeight: 1.5, fontFamily: 'inherit', outline: 'none', background: 'white',
+        }}
+      />
+    </div>
+  )
 }
 
 // Resolves what each row's Content / Page-Person columns should show and how they behave.
@@ -429,7 +475,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
-  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
+  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
 
   useEffect(() => { 
     const init = async () => {
@@ -535,7 +581,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       return arr.map((h, i) => ({ ...h, sort_order: i + 1 }))
     })
   }
-  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: prev.length + 1, page_reference: '', is_gospel: false, reader: '' }]) }
+  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: prev.length + 1, page_reference: '', is_gospel: false, reader: '' }]) }
   function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
   function moveScripture(idx, dir) {
     setServiceScriptures(prev => {
@@ -608,7 +654,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   function startNew() {
     setForm({ ...EMPTY_FORM, bulletin_order: buildOrderForContext(EMPTY_FORM.service_type, EMPTY_FORM.is_communion) })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
-    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
+    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
     setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
 
@@ -662,7 +708,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
         ? svc.service_scriptures.sort((a, b) => a.sort_order - b.sort_order).map(s => ({
             ...s, page_reference: s.page_reference || '', is_gospel: s.is_gospel || false, reader: s.reader || '',
           }))
-        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, sort_order: 1, page_reference: '', is_gospel: false, reader: '' }]
+        : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }]
     )
     setEditingService(svc); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
@@ -696,7 +742,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       const validScriptures = serviceScriptures.filter(s => s.reference)
       if (validScriptures.length > 0) {
         await supabase.from('service_scriptures').insert(
-          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false, reader: s.reader || null }))
+          validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, call_response_text: s.call_response_text || null, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false, reader: s.reader || null }))
         )
       }
       setSaveStatus('success'); loadServices()
@@ -997,6 +1043,17 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                     </div>
                     {s.reference && <a href={buildBibleGatewayUrl(s.reference, s.bible_version)} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600 }}>🔗 Bible Gateway</a>}
                   </div>
+                  {s.is_call_and_response && (
+                    <div style={{ marginTop: '10px' }}>
+                      <label className="form-label">Call & Response Text</label>
+                      <RichTextArea
+                        value={s.call_response_text}
+                        onChange={html => updateScripture(idx, 'call_response_text', html)}
+                        placeholder="Leader: The Lord be with you. People: And also with you."
+                        minHeight={90}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1005,7 +1062,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
               <h2 style={sectionHead}>🙏 Call to Worship</h2>
               <div className="form-group">
                 <label className="form-label">Full Text</label>
-                <textarea value={form.call_to_worship_text} onChange={e => setForm(f => ({ ...f, call_to_worship_text: e.target.value }))} placeholder="There is no one like you, God of Abraham and Sarah..." style={{ minHeight: '140px' }} />
+                <RichTextArea value={form.call_to_worship_text} onChange={html => setForm(f => ({ ...f, call_to_worship_text: html }))} placeholder="There is no one like you, God of Abraham and Sarah..." minHeight={140} />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Source Citation</label>
@@ -1017,7 +1074,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
               <h2 style={sectionHead}>🕊️ Offertory Prayer</h2>
               <div className="form-group">
                 <label className="form-label">Full Text</label>
-                <textarea value={form.offertory_prayer_text} onChange={e => setForm(f => ({ ...f, offertory_prayer_text: e.target.value }))} placeholder="Listening God, you hear the cries we whisper..." style={{ minHeight: '140px' }} />
+                <RichTextArea value={form.offertory_prayer_text} onChange={html => setForm(f => ({ ...f, offertory_prayer_text: html }))} placeholder="Listening God, you hear the cries we whisper..." minHeight={140} />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Source Citation</label>
