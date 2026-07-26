@@ -701,7 +701,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       }
       setSaveStatus('success'); loadServices()
       setTimeout(() => setView('list'), 800)
-    } catch (err) { console.error(err); setSaveStatus('error') }
+    } catch (err) { console.error(err); setSaveStatus(err.message || 'error') }
     setSaving(false)
   }
 
@@ -740,7 +740,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           </button>
         </div>
         {saveStatus === 'success' && <div className="alert alert-success" style={{ margin: '12px 28px 0' }}>✓ Saved!</div>}
-        {saveStatus === 'error' && <div className="alert alert-error" style={{ margin: '12px 28px 0' }}>Something went wrong.</div>}
+        {saveStatus && saveStatus !== 'success' && <div className="alert alert-error" style={{ margin: '12px 28px 0' }}>{saveStatus}</div>}
 
         <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
