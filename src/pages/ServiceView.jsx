@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import VolunteerRolesPanel from '../components/VolunteerRolesPanel.jsx'
+import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 
 function getSeasonStyle(color) {
   const map = {
@@ -27,6 +28,7 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
   const [scriptures, setScriptures] = useState([])
   const [hymnTitles, setHymnTitles] = useState({})
   const [loading, setLoading] = useState(true)
+  const [showGenerateModal, setShowGenerateModal] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -83,8 +85,20 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
             )}
           </div>
         </div>
-        <button className="btn btn-primary" onClick={onEdit}>✏️ Edit Service</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn btn-secondary" onClick={() => setShowGenerateModal(true)}>📄 Generate Bulletin</button>
+          <button className="btn btn-primary" onClick={onEdit}>✏️ Edit Service</button>
+        </div>
       </div>
+
+      {showGenerateModal && (
+        <BulletinGenerateModal
+          service={service}
+          hymns={hymns}
+          scriptures={scriptures}
+          onClose={() => setShowGenerateModal(false)}
+        />
+      )}
 
       <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
 
@@ -107,6 +121,8 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
               <Row label="Communion">
                 {service.is_communion ? <span style={{ color: '#856404', fontWeight: 600 }}>🥖 Yes</span> : '—'}
               </Row>
+              {service.special_designation && <Row label="Designation">{service.special_designation}</Row>}
+              <Row label="Service Time">{service.service_time || '—'}</Row>
             </div>
           </div>
 
@@ -132,6 +148,43 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
               <Row label="Liturgist">{service.liturgist || '—'}</Row>
             </div>
           </div>
+
+          {/* Call to Worship */}
+          {service.call_to_worship_text && (
+            <div className="card">
+              <h2 style={sHead}>🙏 Call to Worship</h2>
+              <div style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6 }}
+                dangerouslySetInnerHTML={{ __html: service.call_to_worship_text }} />
+              {service.call_to_worship_source && (
+                <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '8px' }}>{service.call_to_worship_source}</div>
+              )}
+            </div>
+          )}
+
+          {/* Offertory Prayer */}
+          {service.offertory_prayer_text && (
+            <div className="card">
+              <h2 style={sHead}>🕊️ Offertory Prayer</h2>
+              <div style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6 }}
+                dangerouslySetInnerHTML={{ __html: service.offertory_prayer_text }} />
+              {service.offering_prayer_source && (
+                <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '8px' }}>{service.offering_prayer_source}</div>
+              )}
+            </div>
+          )}
+
+          {/* Announcements */}
+          {(service.announcements_list || service.announcements_reader) && (
+            <div className="card">
+              <h2 style={sHead}>📢 Announcements</h2>
+              {service.announcements_reader && <Row label="Reader">{service.announcements_reader}</Row>}
+              {service.announcements_list && (
+                <p style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: service.announcements_reader ? '10px' : 0 }}>
+                  {service.announcements_list}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Notes */}
           {service.notes && (

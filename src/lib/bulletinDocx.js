@@ -46,6 +46,25 @@ function run(text, opts = {}) {
   return new TextRun({ text, font: FONT, size: BODY_SIZE, ...opts })
 }
 
+// Splits a line that may contain <strong>/<b> and <em>/<i> tags (from the
+// Call to Worship / Offertory Prayer rich text boxes) into TextRuns with
+// bold/italics set, instead of printing the raw tags as literal text.
+function parseFormattedRuns(text, runOpts = {}) {
+  if (!text) return [run('', runOpts)]
+  const normalized = text
+    .replace(/<b>/gi, '<strong>').replace(/<\/b>/gi, '</strong>')
+    .replace(/<i>/gi, '<em>').replace(/<\/i>/gi, '</em>')
+  const runs = []
+  const pattern = /<strong>(.*?)<\/strong>|<em>(.*?)<\/em>|([^<]+)/gi
+  let match
+  while ((match = pattern.exec(normalized)) !== null) {
+    if (match[1] !== undefined) runs.push(run(match[1], { ...runOpts, bold: true }))
+    else if (match[2] !== undefined) runs.push(run(match[2], { ...runOpts, italics: true }))
+    else if (match[3]) runs.push(run(match[3], runOpts))
+  }
+  return runs.length ? runs : [run('', runOpts)]
+}
+
 // Tighter spacing than the source docs' w:line="360" — less padding between
 // lines per Corissa's request. 276 ≈ single-spaced-plus-a-touch (matches
 // the Normal style's own default line spacing seen in the source files).
@@ -95,7 +114,7 @@ function tabbedPara(label, middle, right, tabStops) {
 /** Multi-line text -> array of Paragraphs, one per line (preserves line breaks like the source docs). */
 function linesToParagraphs(lines, runOpts = {}) {
   if (!lines || lines.length === 0) return [para(run('', runOpts))]
-  return lines.map(line => para(run(line, runOpts)))
+  return lines.map(line => para(parseFormattedRuns(line, runOpts)))
 }
 
 function buildOrderOfServiceParagraphs(service, hymns, scriptures) {

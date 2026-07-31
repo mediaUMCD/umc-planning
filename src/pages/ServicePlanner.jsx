@@ -158,6 +158,7 @@ function truncate(text, n) {
 function RichTextArea({ value, onChange, placeholder, minHeight = 140 }) {
   const ref = useRef(null)
   const [focused, setFocused] = useState(false)
+  const savedRange = useRef(null)
 
   useEffect(() => {
     if (ref.current && !focused && ref.current.innerHTML !== (value || '')) {
@@ -165,25 +166,56 @@ function RichTextArea({ value, onChange, placeholder, minHeight = 140 }) {
     }
   }, [value, focused])
 
-  function toggleBold() {
-    ref.current?.focus()
-    document.execCommand('bold')
-    onChange(ref.current.innerHTML)
+  // The toolbar button steals focus/selection the instant it's clicked, so we
+  // capture the Range on every selection change and restore it right before
+  // toggling. execCommand itself is what correctly un-bolds an already-bold
+  // selection (rather than nesting another wrapper around it) and handles
+  // selections that only partially overlap bold text — a manual DOM
+  // wrap/unwrap can't reliably match that native behavior.
+  function saveSelection() {
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && ref.current?.contains(sel.anchorNode)) {
+      savedRange.current = sel.getRangeAt(0).cloneRange()
+    }
+  }
+
+  function toggleFormat(command) {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const sel = window.getSelection()
+    if (savedRange.current) {
+      sel.removeAllRanges()
+      sel.addRange(savedRange.current)
+    }
+    if (sel.isCollapsed) return // nothing selected — no-op rather than inserting anything
+    document.execCommand(command)
+    onChange(el.innerHTML)
+    saveSelection()
   }
 
   return (
     <div>
       <style>{`.rich-textarea:empty:before { content: attr(data-placeholder); color: var(--gray-400); }`}</style>
-      <button type="button" onMouseDown={e => e.preventDefault()} onClick={toggleBold} title="Bold"
-        style={{ width: 30, height: 26, fontWeight: 800, fontSize: 13, border: '1px solid var(--gray-200)', borderRadius: '6px 6px 0 0', borderBottom: 'none', background: 'var(--gray-50)', cursor: 'pointer', color: 'var(--gray-700)' }}>
-        B
-      </button>
+      <div style={{ display: 'flex' }}>
+        <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => toggleFormat('bold')} title="Bold selected text (click again to remove)"
+          style={{ width: 30, height: 26, fontWeight: 800, fontSize: 13, border: '1px solid var(--gray-200)', borderRadius: '6px 0 0 0', borderRight: 'none', borderBottom: 'none', background: 'var(--gray-50)', cursor: 'pointer', color: 'var(--gray-700)' }}>
+          B
+        </button>
+        <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => toggleFormat('italic')} title="Italicize selected text (click again to remove)"
+          style={{ width: 30, height: 26, fontWeight: 700, fontStyle: 'italic', fontSize: 13, border: '1px solid var(--gray-200)', borderRadius: '0 6px 0 0', borderBottom: 'none', background: 'var(--gray-50)', cursor: 'pointer', color: 'var(--gray-700)' }}>
+          I
+        </button>
+      </div>
       <div
         ref={ref}
         contentEditable
         suppressContentEditableWarning
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onSelect={saveSelection}
+        onMouseUp={saveSelection}
+        onKeyUp={saveSelection}
         onInput={() => onChange(ref.current.innerHTML)}
         data-placeholder={placeholder}
         className="rich-textarea"
@@ -437,11 +469,17 @@ const SPECIAL_ORDER_TEMPLATES = {
 // checked and the template doesn't already include communion rows — splices
 // in Great Thanksgiving / Breaking the Bread right after the sermon (or the
 // creed, or at the end if neither exists).
-function buildOrderForContext(serviceType, isCommunion) {
-  let types = SPECIAL_ORDER_TEMPLATES[serviceType] || DEFAULT_ORDER_TYPES
+function buildOrderForContext(serviceType, isCommunion, scriptureCount = 1) {
+  let types = [...(SPECIAL_ORDER_TEMPLATES[serviceType] || DEFAULT_ORDER_TYPES)]
+  // Repeat the 'scripture' slot once per reading entered above (minimum 1),
+  // so a second/third scripture gets its own row instead of only showing the first.
+  const scriptureIdx = types.indexOf('scripture')
+  if (scriptureIdx !== -1) {
+    const extra = Math.max(1, scriptureCount) - 1
+    if (extra > 0) types.splice(scriptureIdx + 1, 0, ...Array(extra).fill('scripture'))
+  }
   if (isCommunion && !types.includes('great_thanksgiving')) {
-    types = [...types]
-    const insertAt = types.includes('sermon') ? types.indexOf('sermon') + 1
+    const insertAt = types.includes('sermon') ? types.lastIndexOf('sermon') + 1
       : types.includes('apostles_creed') ? types.indexOf('apostles_creed') + 1
       : types.length
     types.splice(insertAt, 0, 'great_thanksgiving', 'breaking_the_bread')
@@ -627,7 +665,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   function syncOrderToTemplate() {
     const label = `${form.service_type}${form.is_communion ? ' + Communion' : ''}`
     if (!confirm(`Replace the current Bulletin Order rows with the default template for "${label}"? Your current rows below will be replaced — this can't be undone unless you re-add them manually.`)) return
-    setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion) }))
+    const scriptureCount = Math.max(1, serviceScriptures.filter(s => s.reference).length)
+    setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion, scriptureCount) }))
   }
 
   function updateScriptureReaderByOccurrence(occurrence, value) {
@@ -692,7 +731,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       special_designation: svc.special_designation || '',
       service_time: svc.service_time || '10:15 a.m.',
       back_cover_photo_url: svc.back_cover_photo_url || '',
-      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false),
+      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false, Math.max(1, svc.service_scriptures?.filter(s => s.reference).length || 1)),
     })
     setServiceHymns(
       svc.service_hymns?.length

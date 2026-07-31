@@ -4,6 +4,47 @@
 // Both the .docx generator (bulletinDocx.js) and the in-app HTML preview
 // (BulletinGenerateModal.jsx) consume this so the two never drift apart.
 
+// The Call to Worship / Offertory Prayer boxes are contentEditable, and
+// browsers represent a new paragraph there as a <div>...</div> (or a <br>),
+// not a literal "\n" character. Splitting the raw value on '\n' does nothing
+// in that case — the whole multi-paragraph blob comes back as a single
+// "line" with nested block tags inside it, which breaks both the docx
+// output and produces invalid HTML nesting in the on-screen preview
+// (a <div> inside a <p>), silently corrupting formatting on some lines.
+// This walks the actual HTML structure instead, so each paragraph becomes
+// its own clean line — keeping any <strong>/<em> tags inside intact.
+export function splitRichTextLines(html) {
+  if (!html) return []
+  const container = document.createElement('div')
+  container.innerHTML = html.replace(/<br\s*\/?>/gi, '</div><div>')
+
+  const hasBlockChildren = Array.from(container.childNodes).some(
+    n => n.nodeType === 1 && n.tagName === 'DIV'
+  )
+  if (!hasBlockChildren) {
+    // Plain single-paragraph content (no paragraph breaks at all).
+    const text = container.innerHTML.trim()
+    return text ? [text] : []
+  }
+
+  const lines = []
+  let buffer = ''
+  for (const node of container.childNodes) {
+    if (node.nodeType === 1 && node.tagName === 'DIV') {
+      if (buffer.trim()) lines.push(buffer.trim())
+      buffer = ''
+      const inner = node.innerHTML.trim()
+      if (inner) lines.push(inner)
+    } else {
+      // Text/inline content before the first <div> (contentEditable often
+      // leaves the very first paragraph unwrapped) — it's a complete line on its own.
+      buffer += (node.outerHTML || node.textContent || '')
+    }
+  }
+  if (buffer.trim()) lines.push(buffer.trim())
+  return lines
+}
+
 export const WELCOME_PARAGRAPH_1 =
   'Good morning and welcome to worship this morning at the United Methodist Church of Danielson ' +
   'where together - in-person and online - we are\n' +
@@ -93,7 +134,7 @@ function buildOrderOfServiceLegacy(service, hymns, scriptures) {
   items.push({
     type: 'block',
     label: 'CALL TO WORSHIP',
-    lines: service.call_to_worship_text ? service.call_to_worship_text.split('\n') : [],
+    lines: service.call_to_worship_text ? splitRichTextLines(service.call_to_worship_text) : [],
   })
 
   if (openingHymn && openingHymn.number) {
@@ -148,7 +189,7 @@ function buildOrderOfServiceLegacy(service, hymns, scriptures) {
   items.push({
     type: 'block',
     label: 'OFFERTORY PRAYER',
-    lines: service.offertory_prayer_text ? service.offertory_prayer_text.split('\n') : [],
+    lines: service.offertory_prayer_text ? splitRichTextLines(service.offertory_prayer_text) : [],
     inlineStaticLabel: true,
   })
 
@@ -179,7 +220,7 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
     case 'call_to_worship':
       return {
         type: 'block', label: 'CALL TO WORSHIP',
-        lines: service.call_to_worship_text ? service.call_to_worship_text.split('\n') : [],
+        lines: service.call_to_worship_text ? splitRichTextLines(service.call_to_worship_text) : [],
       }
     case 'hymn': {
       const nonClosing = hymns.filter(h => !h.is_closing)
@@ -235,7 +276,7 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
     case 'offertory_prayer':
       return {
         type: 'block', label: 'OFFERTORY PRAYER',
-        lines: service.offertory_prayer_text ? service.offertory_prayer_text.split('\n') : [],
+        lines: service.offertory_prayer_text ? splitRichTextLines(service.offertory_prayer_text) : [],
         inlineStaticLabel: true,
       }
     case 'doxology':

@@ -57,15 +57,15 @@ function OrderItem({ item, isLandscape }) {
   if (item.inlineStaticLabel) {
     return (
       <>
-        <p style={style}>{item.label} &ndash; {lines[0]}</p>
-        {lines.slice(1).map((l, i) => <p key={i} style={style}>{l}</p>)}
+        <p style={style}>{item.label} &ndash; <span dangerouslySetInnerHTML={{ __html: lines[0] }} /></p>
+        {lines.slice(1).map((l, i) => <p key={i} style={style} dangerouslySetInnerHTML={{ __html: l }} />)}
       </>
     )
   }
   return (
     <>
       <p style={style}>{item.label}</p>
-      {lines.map((l, i) => <p key={i} style={style}>{l}</p>)}
+      {lines.map((l, i) => <p key={i} style={style} dangerouslySetInnerHTML={{ __html: l }} />)}
     </>
   )
 }
