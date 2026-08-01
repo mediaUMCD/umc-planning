@@ -42,7 +42,7 @@ function OrderItem({ item, isLandscape }) {
     }
     // Portrait: three columns, roughly matching the 2.5"/6" tab stops in a 9" column (~28%/67%).
     return (
-      <p style={{ ...style, display: 'flex', gap: '4px' }}>
+      <p style={{ ...style, display: 'flex', gap: '4px', alignItems: 'center' }}>
         <span style={{ width: '28%', flexShrink: 0 }}>{item.label}</span>
         <span style={{ width: '39%', flexShrink: 0 }}>{item.middle || ''}</span>
         <span>{item.right || ''}</span>
@@ -89,8 +89,8 @@ function BulletinPreview({ service, hymns, scriptures, staticContent }) {
   return (
     <div style={{ background: 'white', padding: '32px', border: '1px solid var(--gray-200)', borderRadius: '8px', maxWidth: isLandscape ? '100%' : '650px', margin: '0 auto' }}>
       <div style={bodyStyle}>
-        <p style={{ margin: '0 0 8px 0' }}>{WELCOME_PARAGRAPH_1.split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}</p>
-        <p style={{ margin: '0 0 12px 0' }}>{WELCOME_PARAGRAPH_2.split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}</p>
+        <p style={{ margin: '0 0 8px 0', textAlign: 'center', fontSize: '15px' }}>{WELCOME_PARAGRAPH_1.split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}</p>
+        <p style={{ margin: '0 0 12px 0', textAlign: 'center', fontSize: '15px' }}>{WELCOME_PARAGRAPH_2.split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}</p>
         {items.map((item, i) => <OrderItem key={i} item={item} isLandscape={isLandscape} />)}
       </div>
 

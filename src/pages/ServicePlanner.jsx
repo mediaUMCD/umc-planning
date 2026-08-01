@@ -401,6 +401,7 @@ const EMPTY_FORM = {
   kids_story_teller: '', liturgist: '', notes: '',
   // Bulletin content
   call_to_worship_text: '', call_to_worship_source: '',
+  call_to_worship_mode: 'paragraph', call_to_worship_lines: [],
   offertory_prayer_text: '', offering_prayer_source: 'Offering Prayer from umcdiscipleship.org',
   children_message_label: "CHILDREN'S MESSAGE", children_message_person: '',
   special_music_title: '', special_music_person: '',
@@ -714,6 +715,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       // Bulletin content
       call_to_worship_text: svc.call_to_worship_text || '',
       call_to_worship_source: svc.call_to_worship_source || '',
+      call_to_worship_mode: svc.call_to_worship_mode || 'paragraph',
+      call_to_worship_lines: Array.isArray(svc.call_to_worship_lines) ? svc.call_to_worship_lines : [],
       offertory_prayer_text: svc.offertory_prayer_text || '',
       offering_prayer_source: svc.offering_prayer_source || 'Offering Prayer from umcdiscipleship.org',
       children_message_label: svc.children_message_label || "CHILDREN'S MESSAGE",
@@ -1099,10 +1102,85 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
             <div className="card">
               <h2 style={sectionHead}>🙏 Call to Worship</h2>
-              <div className="form-group">
-                <label className="form-label">Full Text</label>
-                <RichTextArea value={form.call_to_worship_text} onChange={html => setForm(f => ({ ...f, call_to_worship_text: html }))} placeholder="There is no one like you, God of Abraham and Sarah..." minHeight={140} />
+
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${form.call_to_worship_mode !== 'responsive' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setForm(f => ({ ...f, call_to_worship_mode: 'paragraph' }))}
+                >
+                  Paragraph
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${form.call_to_worship_mode === 'responsive' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setForm(f => ({
+                    ...f,
+                    call_to_worship_mode: 'responsive',
+                    call_to_worship_lines: f.call_to_worship_lines.length ? f.call_to_worship_lines
+                      : [{ id: newRowId(), speaker: 'Leader', text: '' }, { id: newRowId(), speaker: 'All', text: '' }],
+                  }))}
+                >
+                  🔁 Call &amp; Response
+                </button>
               </div>
+
+              {form.call_to_worship_mode === 'responsive' ? (
+                <div className="form-group">
+                  <label className="form-label">Lines (All lines print bold, like the congregation reading aloud)</label>
+                  {form.call_to_worship_lines.map((line, idx) => (
+                    <div key={line.id} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <select
+                        value={line.speaker}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          call_to_worship_lines: f.call_to_worship_lines.map(l => l.id === line.id ? { ...l, speaker: e.target.value } : l),
+                        }))}
+                        style={{ width: '90px', flexShrink: 0 }}
+                      >
+                        <option value="Leader">Leader</option>
+                        <option value="All">All</option>
+                      </select>
+                      <textarea
+                        value={line.text}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          call_to_worship_lines: f.call_to_worship_lines.map(l => l.id === line.id ? { ...l, text: e.target.value } : l),
+                        }))}
+                        placeholder={line.speaker === 'All' ? 'What the congregation reads together...' : "What the leader reads..."}
+                        rows={2}
+                        style={{ flex: 1, resize: 'vertical' }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setForm(f => ({ ...f, call_to_worship_lines: f.call_to_worship_lines.filter(l => l.id !== line.id) }))}
+                        title="Remove line"
+                        style={{ flexShrink: 0 }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setForm(f => {
+                      const lastSpeaker = f.call_to_worship_lines[f.call_to_worship_lines.length - 1]?.speaker
+                      const nextSpeaker = lastSpeaker === 'All' ? 'Leader' : 'All'
+                      return { ...f, call_to_worship_lines: [...f.call_to_worship_lines, { id: newRowId(), speaker: nextSpeaker, text: '' }] }
+                    })}
+                  >
+                    + Add Line
+                  </button>
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label className="form-label">Full Text</label>
+                  <RichTextArea value={form.call_to_worship_text} onChange={html => setForm(f => ({ ...f, call_to_worship_text: html }))} placeholder="There is no one like you, God of Abraham and Sarah..." minHeight={140} />
+                </div>
+              )}
+
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Source Citation</label>
                 <input type="text" value={form.call_to_worship_source} onChange={e => setForm(f => ({ ...f, call_to_worship_source: e.target.value }))} placeholder="e.g. Lectionary Worship Aids: Series VIII, Cycle A..." />

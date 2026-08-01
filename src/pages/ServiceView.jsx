@@ -40,18 +40,22 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
         supabase.from('hymns').select('hymnal, number, title')
       ])
 
-      if (svc) {
-        setService(svc)
-        setHymns(svc.service_hymns?.sort((a, b) => a.sort_order - b.sort_order) || [])
-        setScriptures(svc.service_scriptures?.sort((a, b) => a.sort_order - b.sort_order) || [])
-      }
-
       // Build hymn title lookup
       const lookup = {}
       for (const h of (hymnDb || [])) {
         lookup[`${h.hymnal}-${h.number}`] = h.title
       }
       setHymnTitles(lookup)
+
+      if (svc) {
+        setService(svc)
+        setHymns(
+          (svc.service_hymns?.sort((a, b) => a.sort_order - b.sort_order) || [])
+            .map(h => ({ ...h, title: h.title || lookup[`${h.hymnal}-${h.number}`] || '' }))
+        )
+        setScriptures(svc.service_scriptures?.sort((a, b) => a.sort_order - b.sort_order) || [])
+      }
+
       setLoading(false)
     }
     load()
@@ -150,11 +154,22 @@ export default function ServiceView({ serviceId, onBack, onEdit }) {
           </div>
 
           {/* Call to Worship */}
-          {service.call_to_worship_text && (
+          {((service.call_to_worship_mode === 'responsive' && service.call_to_worship_lines?.length) || service.call_to_worship_text) && (
             <div className="card">
               <h2 style={sHead}>🙏 Call to Worship</h2>
-              <div style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6 }}
-                dangerouslySetInnerHTML={{ __html: service.call_to_worship_text }} />
+              {service.call_to_worship_mode === 'responsive' ? (
+                <div style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6 }}>
+                  {service.call_to_worship_lines.filter(l => l.text?.trim()).map((l, i) => (
+                    <p key={i} style={{ margin: '0 0 6px 0', fontWeight: l.speaker === 'All' ? 700 : 400 }}>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', marginRight: '6px' }}>{l.speaker.toUpperCase()}</span>
+                      {l.text}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '14px', color: 'var(--gray-800)', lineHeight: 1.6 }}
+                  dangerouslySetInnerHTML={{ __html: service.call_to_worship_text }} />
+              )}
               {service.call_to_worship_source && (
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '8px' }}>{service.call_to_worship_source}</div>
               )}

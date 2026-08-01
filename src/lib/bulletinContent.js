@@ -45,6 +45,25 @@ export function splitRichTextLines(html) {
   return lines
 }
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Turns Call & Response lines into the same array-of-HTML-line format the
+// paragraph rich-text mode produces, so both modes flow through the exact
+// same bold-rendering pipeline downstream. "All" lines are bolded — the
+// long-standing convention (matching the source bulletins) for lines the
+// congregation reads together, vs. plain text for the Leader's lines.
+function callToWorshipLines(service) {
+  if (service.call_to_worship_mode === 'responsive' && Array.isArray(service.call_to_worship_lines)) {
+    return service.call_to_worship_lines
+      .filter(l => l.text && l.text.trim())
+      .map(l => l.speaker === 'All' ? `<strong>${escapeHtml(l.text)}</strong>` : escapeHtml(l.text))
+  }
+  return service.call_to_worship_text ? splitRichTextLines(service.call_to_worship_text) : []
+}
+
 export const WELCOME_PARAGRAPH_1 =
   'Good morning and welcome to worship this morning at the United Methodist Church of Danielson ' +
   'where together - in-person and online - we are\n' +
@@ -134,7 +153,7 @@ function buildOrderOfServiceLegacy(service, hymns, scriptures) {
   items.push({
     type: 'block',
     label: 'CALL TO WORSHIP',
-    lines: service.call_to_worship_text ? splitRichTextLines(service.call_to_worship_text) : [],
+    lines: callToWorshipLines(service),
   })
 
   if (openingHymn && openingHymn.number) {
@@ -220,7 +239,7 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
     case 'call_to_worship':
       return {
         type: 'block', label: 'CALL TO WORSHIP',
-        lines: service.call_to_worship_text ? splitRichTextLines(service.call_to_worship_text) : [],
+        lines: callToWorshipLines(service),
       }
     case 'hymn': {
       const nonClosing = hymns.filter(h => !h.is_closing)
@@ -249,30 +268,30 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
     }
     case 'childrens_message':
       return {
-        type: 'inline',
+        type: 'tabbed',
         label: service.children_message_label || "CHILDREN'S MESSAGE",
-        value: service.children_message_person || '',
+        middle: '', right: service.children_message_person || '',
       }
     case 'special_music':
       if (!service.special_music_title && !service.special_music_person) return null
       return {
-        type: 'inline', label: 'SPECIAL MUSIC',
-        value: [service.special_music_title, service.special_music_person].filter(Boolean).join('   '),
+        type: 'tabbed', label: 'SPECIAL MUSIC',
+        middle: service.special_music_title || '', right: service.special_music_person || '',
       }
     case 'sermon': {
       const title = row.contentOverride ?? service.spark_title
       return {
-        type: 'inline', label: 'MESSAGE',
-        value: [title ? `\u201C${title}\u201D` : '', service.spark_preacher].filter(Boolean).join('   '),
+        type: 'tabbed', label: 'MESSAGE',
+        middle: title ? `\u201C${title}\u201D` : '', right: service.spark_preacher || '',
       }
     }
     case 'apostles_creed':
       if (!service.apostles_creed_ref) return null
-      return { type: 'inline', label: 'APOSTLES CREED', value: service.apostles_creed_ref }
+      return { type: 'tabbed', label: 'APOSTLES CREED', middle: '', right: service.apostles_creed_ref }
     case 'pastoral_prayer':
-      return { type: 'inline', label: 'JOYS AND CONCERNS/PASTORAL PRAYER', value: service.pastoral_prayer_person || '' }
+      return { type: 'tabbed', label: 'JOYS AND CONCERNS/PASTORAL PRAYER', middle: '', right: service.pastoral_prayer_person || '' }
     case 'lords_prayer':
-      return { type: 'inline', label: 'LORD\u2019S PRAYER - UMH #895', value: service.lords_prayer_leader || '' }
+      return { type: 'tabbed', label: 'LORD\u2019S PRAYER - UMH #895', middle: '', right: service.lords_prayer_leader || '' }
     case 'offertory_prayer':
       return {
         type: 'block', label: 'OFFERTORY PRAYER',
@@ -281,9 +300,9 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
       }
     case 'doxology':
       if (!service.doxology_ref) return null
-      return { type: 'inline', label: 'DOXOLOGY', value: service.doxology_ref }
+      return { type: 'tabbed', label: 'DOXOLOGY', middle: '', right: service.doxology_ref }
     case 'announcements':
-      return { type: 'inline', label: 'WEEKLY ANNOUNCEMENTS', value: service.announcements_reader || '' }
+      return { type: 'tabbed', label: 'WEEKLY ANNOUNCEMENTS', middle: '', right: service.announcements_reader || '' }
     case 'benediction':
       return { type: 'static-label', label: row.contentOverride ?? 'BENEDICTION' }
     case 'great_thanksgiving':

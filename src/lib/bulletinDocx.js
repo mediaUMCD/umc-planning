@@ -36,7 +36,7 @@ const SMALL_SIZE = 21  // 10.5pt — matches Page 2 citations/footer text in sou
 // right for a clean aligned look without truncating the title.
 const TAB_STOPS_PORTRAIT = [
   { type: TabStopType.LEFT, position: 2.5 * 1440 },
-  { type: TabStopType.LEFT, position: 6 * 1440 },
+  { type: TabStopType.RIGHT, position: 7.4 * 1440 },
 ]
 const TAB_STOPS_LANDSCAPE = [
   { type: TabStopType.RIGHT, position: 4.75 * 1440 },
@@ -49,6 +49,22 @@ function run(text, opts = {}) {
 // Splits a line that may contain <strong>/<b> and <em>/<i> tags (from the
 // Call to Worship / Offertory Prayer rich text boxes) into TextRuns with
 // bold/italics set, instead of printing the raw tags as literal text.
+function decodeHtmlEntities(text) {
+  return text
+    .replace(/&nbsp;/gi, '\u00A0')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, '\u2019')
+    .replace(/&rsquo;/gi, '\u2019')
+    .replace(/&lsquo;/gi, '\u2018')
+    .replace(/&rdquo;/gi, '\u201D')
+    .replace(/&ldquo;/gi, '\u201C')
+    .replace(/&mdash;/gi, '\u2014')
+    .replace(/&ndash;/gi, '\u2013')
+}
+
 function parseFormattedRuns(text, runOpts = {}) {
   if (!text) return [run('', runOpts)]
   const normalized = text
@@ -58,9 +74,9 @@ function parseFormattedRuns(text, runOpts = {}) {
   const pattern = /<strong>(.*?)<\/strong>|<em>(.*?)<\/em>|([^<]+)/gi
   let match
   while ((match = pattern.exec(normalized)) !== null) {
-    if (match[1] !== undefined) runs.push(run(match[1], { ...runOpts, bold: true }))
-    else if (match[2] !== undefined) runs.push(run(match[2], { ...runOpts, italics: true }))
-    else if (match[3]) runs.push(run(match[3], runOpts))
+    if (match[1] !== undefined) runs.push(run(decodeHtmlEntities(match[1]), { ...runOpts, bold: true }))
+    else if (match[2] !== undefined) runs.push(run(decodeHtmlEntities(match[2]), { ...runOpts, italics: true }))
+    else if (match[3]) runs.push(run(decodeHtmlEntities(match[3]), runOpts))
   }
   return runs.length ? runs : [run('', runOpts)]
 }
@@ -99,8 +115,27 @@ function blankLine() {
  *   — label and middle run together with a single space since the column
  *   is too narrow for a fixed label/title boundary; right text (page or
  *   hymnal ref) is pushed flush right.
+ *
+ * When there's no middle text (Pastoral Prayer, Lord's Prayer, Doxology,
+ * etc. — just a label + a right-column name/ref), we skip straight to a
+ * single flush-right tab even in portrait. A long label like "JOYS AND
+ * CONCERNS/PASTORAL PRAYER" is wider than the fixed 2.5" label column and
+ * wraps onto a second line *before* ever reaching the first tab stop —
+ * which strands the right-column value on its own orphaned line. Going
+ * straight to one right-aligned tab lets the label wrap like normal text,
+ * and the right value still lands correctly at the far right of whichever
+ * line the label ends on (the same technique that already works for the
+ * wrapping Sermon title row).
  */
 function tabbedPara(label, middle, right, tabStops) {
+  if (!middle && tabStops.length > 1) {
+    const flushRight = [{ type: TabStopType.RIGHT, position: 7.4 * 1440 }]
+    return new Paragraph({
+      tabStops: flushRight,
+      spacing: LINE_SPACING,
+      children: [run(`${label}\t${right || ''}`)],
+    })
+  }
   const text = tabStops.length === 1
     ? `${label}${middle ? ' ' + middle : ''}\t${right || ''}`
     : `${label}\t${middle || ''}\t${right || ''}`
@@ -111,11 +146,6 @@ function tabbedPara(label, middle, right, tabStops) {
   })
 }
 
-/** Multi-line text -> array of Paragraphs, one per line (preserves line breaks like the source docs). */
-function linesToParagraphs(lines, runOpts = {}) {
-  if (!lines || lines.length === 0) return [para(run('', runOpts))]
-  return lines.map(line => para(parseFormattedRuns(line, runOpts)))
-}
 
 function buildOrderOfServiceParagraphs(service, hymns, scriptures) {
   const items = buildOrderOfService(service, hymns, scriptures)
@@ -141,11 +171,11 @@ function buildOrderOfServiceParagraphs(service, hymns, scriptures) {
       const lines = item.lines && item.lines.length ? item.lines : ['']
       if (item.inlineStaticLabel) {
         // e.g. "OFFERING \u2013 As forgiven..." / "OFFERTORY PRAYER \u2013 Listening God..."
-        paragraphs.push(para(run(`${item.label} \u2013 ${lines[0]}`)))
-        for (const extra of lines.slice(1)) paragraphs.push(para(run(extra)))
+        paragraphs.push(para([run(`${item.label} \u2013 `), ...parseFormattedRuns(lines[0])]))
+        for (const extra of lines.slice(1)) paragraphs.push(para(parseFormattedRuns(extra)))
       } else {
         paragraphs.push(para(run(item.label)))
-        for (const line of lines) paragraphs.push(para(run(line)))
+        for (const line of lines) paragraphs.push(para(parseFormattedRuns(line)))
       }
     }
   }
