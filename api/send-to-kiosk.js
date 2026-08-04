@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { title, description, event_date, event_time, location, existingKioskEventId } = req.body || {}
+  const { title, description, event_date, event_time, location, existingKioskEventId, signupFields } = req.body || {}
   if (!title) return res.status(400).json({ error: 'Missing title' })
 
   try {
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         'x-import-secret': process.env.PLANNING_IMPORT_SECRET,
       },
-      body: JSON.stringify({ title, description, event_date, event_time, location, existingKioskEventId }),
+      body: JSON.stringify({ title, description, event_date, event_time, location, existingKioskEventId, signupFields }),
     })
 
     const json = await kioskRes.json()

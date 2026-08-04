@@ -85,6 +85,7 @@ export default function EventPlanner({ onPrint }) {
           event_time: selected.event_time || '',
           location: selected.location || '',
           existingKioskEventId: selected.kiosk_event_id || null,
+          signupFields: selected.kiosk_signup_fields || [],
         }),
       })
       const json = await res.json()
