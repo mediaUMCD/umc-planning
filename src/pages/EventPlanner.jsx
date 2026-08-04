@@ -35,6 +35,8 @@ export default function EventPlanner({ onPrint }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [saveMsg, setSaveMsg] = useState('')
+  const [sendingToKiosk, setSendingToKiosk] = useState(false)
+  const [kioskMsg, setKioskMsg] = useState('')
 
   const [newSupply, setNewSupply] = useState({ item: '', qty: '', notes: '' })
   const [newSwag, setNewSwag] = useState({ item: '', qty: '', notes: '' })
@@ -67,6 +69,42 @@ export default function EventPlanner({ onPrint }) {
       congregation_notes: data.congregation_notes || '', internal_notes: data.internal_notes || '',
     } : { ...BLANK_PLANNING })
     setPlanningLoading(false)
+  }
+
+  async function sendToKiosk() {
+    if (!selected) return
+    setSendingToKiosk(true); setKioskMsg('')
+    try {
+      const res = await fetch('/api/send-to-kiosk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: selected.event_name,
+          description: selected.description || '',
+          event_date: selected.event_date || null,
+          event_time: selected.event_time || '',
+          location: selected.location || '',
+          existingKioskEventId: selected.kiosk_event_id || null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to send to kiosk')
+
+      // Persist the link so future sends update the same kiosk event instead
+      // of creating a duplicate, and so the button correctly shows "Update"
+      // next time this event is opened.
+      if (json.kioskEventId && json.kioskEventId !== selected.kiosk_event_id) {
+        await supabase.from('event_proposals').update({ kiosk_event_id: json.kioskEventId }).eq('id', selected.id)
+        setSelected(s => ({ ...s, kiosk_event_id: json.kioskEventId }))
+        setProposals(ps => ps.map(p => p.id === selected.id ? { ...p, kiosk_event_id: json.kioskEventId } : p))
+      }
+      setKioskMsg(json.created ? 'Sent to kiosk!' : 'Updated on kiosk!')
+    } catch (err) {
+      setKioskMsg('Error: ' + err.message)
+    } finally {
+      setSendingToKiosk(false)
+      setTimeout(() => setKioskMsg(''), 4000)
+    }
   }
 
   async function savePlanning() {
@@ -289,6 +327,10 @@ export default function EventPlanner({ onPrint }) {
                     🖨 Print
                   </button>
                 )}
+                <button className="btn btn-secondary" style={{ padding:'8px 16px' }} onClick={sendToKiosk} disabled={sendingToKiosk}>
+                  {sendingToKiosk ? 'Sending…' : selected.kiosk_event_id ? '🔄 Update on Kiosk' : '📤 Send to Kiosk'}
+                </button>
+                {kioskMsg && <span style={{ fontSize:12, color: kioskMsg.startsWith('Error') ? '#dc2626':'#059669', fontWeight:600 }}>{kioskMsg}</span>}
                 <button className="btn btn-primary" style={{ padding:'8px 18px' }} onClick={savePlanning} disabled={saving||planningLoading}>
                   {saving ? 'Saving…' : 'Save Plan'}
                 </button>
