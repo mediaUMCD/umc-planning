@@ -35,6 +35,12 @@ async function uploadToStorage(file) {
   return data.publicUrl
 }
 
+function totalStock(p) {
+  return p.variants && p.variants.length > 0
+    ? p.variants.reduce((s, v) => s + Number(v.quantity_on_hand || 0), 0)
+    : Number(p.quantity_on_hand || 0)
+}
+
 export default function Fundraising() {
   const [tab, setTab] = useState('inventory') // 'inventory' | 'ledger'
   const [products, setProducts] = useState([])
@@ -53,7 +59,16 @@ export default function Fundraising() {
     setError('')
     const { data: prods, error: pErr } = await supabase.from('fundraising_products').select('*').order('name', { ascending: true })
     if (pErr) { setError(pErr.message); setLoading(false); return }
-    setProducts(prods || [])
+
+    const { data: variants, error: vErr } = await supabase.from('fundraising_variants').select('*').order('sort_order', { ascending: true })
+    if (vErr) { setError(vErr.message); setLoading(false); return }
+
+    const variantsByProduct = {}
+    for (const v of variants || []) {
+      if (!variantsByProduct[v.product_id]) variantsByProduct[v.product_id] = []
+      variantsByProduct[v.product_id].push(v)
+    }
+    setProducts((prods || []).map(p => ({ ...p, variants: variantsByProduct[p.id] || [] })))
 
     const { data: txs, error: tErr } = await supabase.from('fundraising_transactions').select('*').order('transaction_date', { ascending: false }).order('created_at', { ascending: false })
     if (tErr) { setError(tErr.message); setLoading(false); return }
@@ -62,7 +77,7 @@ export default function Fundraising() {
   }
 
   const summary = useMemo(() => {
-    const inventoryValue = products.reduce((s, p) => s + Number(p.cost || 0) * Number(p.quantity_on_hand || 0), 0)
+    const inventoryValue = products.reduce((s, p) => s + Number(p.cost || 0) * totalStock(p), 0)
     const moneyIn = transactions.filter(t => t.type === 'sale' || t.type === 'donation').reduce((s, t) => s + Number(t.amount || 0), 0)
     const moneyOut = transactions.filter(t => t.type === 'purchase').reduce((s, t) => s + Number(t.amount || 0), 0)
     const adjustments = transactions.filter(t => t.type === 'adjustment').reduce((s, t) => s + Number(t.amount || 0), 0)
@@ -167,6 +182,8 @@ function InventoryGrid({ products, onEdit, onDelete }) {
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px' }}>
       {products.map(p => {
         const margin = Number(p.sale_price || 0) - Number(p.cost || 0)
+        const stock = totalStock(p)
+        const hasVariants = p.variants && p.variants.length > 0
         return (
           <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ aspectRatio: '4/3', background: 'var(--gray-100)' }}>
@@ -176,6 +193,19 @@ function InventoryGrid({ products, onEdit, onDelete }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '32px', color: 'var(--gray-200)' }}>🖼️</div>
               )}
             </div>
+            {hasVariants && (
+              <div style={{ display: 'flex', gap: '4px', padding: '8px 14px 0', overflowX: 'auto' }}>
+                {p.variants.map(v => (
+                  <img
+                    key={v.id}
+                    src={v.image_url || p.image_url}
+                    alt={v.option_value}
+                    title={`${v.option_value} — ${v.quantity_on_hand} in stock`}
+                    style={{ width: '32px', height: '32px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--gray-200)', flexShrink: 0 }}
+                  />
+                ))}
+              </div>
+            )}
             <div style={{ padding: '12px 14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--gray-800)' }}>{p.name}</div>
@@ -190,8 +220,8 @@ function InventoryGrid({ products, onEdit, onDelete }) {
               <div style={{ fontSize: '11px', color: margin >= 0 ? 'var(--gray-400)' : 'var(--danger)', marginTop: '2px' }}>
                 Margin {money(margin)} / item
               </div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: p.quantity_on_hand <= 0 ? 'var(--danger)' : 'var(--gray-800)', marginTop: '8px' }}>
-                {p.quantity_on_hand} in stock
+              <div style={{ fontSize: '13px', fontWeight: 700, color: stock <= 0 ? 'var(--danger)' : 'var(--gray-800)', marginTop: '8px' }}>
+                {stock} in stock{hasVariants ? ` (${p.variants.length} options)` : ''}
               </div>
 
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -204,6 +234,20 @@ function InventoryGrid({ products, onEdit, onDelete }) {
       })}
     </div>
   )
+}
+
+let variantKeySeq = 0
+function newVariantRow(v) {
+  return {
+    key: v?.id || `new-${variantKeySeq++}`,
+    id: v?.id || null,
+    value: v?.option_value || '',
+    quantity: v?.quantity_on_hand ?? 0,
+    existingImageUrl: v?.image_url || null,
+    imageFile: null,
+    imagePreview: v?.image_url || null,
+    removed: false,
+  }
 }
 
 function ProductFormModal({ product, onClose, onSaved }) {
@@ -221,11 +265,33 @@ function ProductFormModal({ product, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const [optionName, setOptionName] = useState(product?.variants?.[0]?.option_name || '')
+  const [variantRows, setVariantRows] = useState((product?.variants || []).map(newVariantRow))
+
+  const activeVariantRows = variantRows.filter(r => !r.removed)
+  const hasVariants = activeVariantRows.length > 0
+  const variantTotal = activeVariantRows.reduce((s, r) => s + Number(r.quantity || 0), 0)
+
   function handleImageChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
     setImageFile(file)
     setImagePreview(URL.createObjectURL(file))
+  }
+
+  function addVariantRow() {
+    setVariantRows(rows => [...rows, newVariantRow()])
+  }
+  function updateVariantRow(key, field, value) {
+    setVariantRows(rows => rows.map(r => r.key === key ? { ...r, [field]: value } : r))
+  }
+  function handleVariantImageChange(key, e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setVariantRows(rows => rows.map(r => r.key === key ? { ...r, imageFile: file, imagePreview: URL.createObjectURL(file) } : r))
+  }
+  function removeVariantRow(key) {
+    setVariantRows(rows => rows.map(r => r.key === key ? { ...r, removed: true } : r).filter(r => r.id || !r.removed))
   }
 
   async function handleSubmit(e) {
@@ -243,15 +309,50 @@ function ProductFormModal({ product, onClose, onSaved }) {
         sale_price: Number(salePrice) || 0,
         fund_source: fundSource,
         vendor: vendor || null,
-        quantity_on_hand: Number(quantity) || 0,
+        quantity_on_hand: hasVariants ? variantTotal : (Number(quantity) || 0),
         is_public: isPublic,
         image_url: imageUrl,
       }
 
-      const { error: err } = isEdit
-        ? await supabase.from('fundraising_products').update(payload).eq('id', product.id)
-        : await supabase.from('fundraising_products').insert([payload])
-      if (err) throw err
+      let productId = product?.id
+      if (isEdit) {
+        const { error: err } = await supabase.from('fundraising_products').update(payload).eq('id', product.id)
+        if (err) throw err
+      } else {
+        const { data, error: err } = await supabase.from('fundraising_products').insert([payload]).select().single()
+        if (err) throw err
+        productId = data.id
+      }
+
+      // Removed existing variants
+      const toDelete = variantRows.filter(r => r.removed && r.id).map(r => r.id)
+      if (toDelete.length > 0) {
+        const { error: delErr } = await supabase.from('fundraising_variants').delete().in('id', toDelete)
+        if (delErr) throw delErr
+      }
+
+      // Add/update remaining variants
+      for (const [index, row] of activeVariantRows.entries()) {
+        let variantImageUrl = row.existingImageUrl
+        if (row.imageFile) variantImageUrl = await uploadToStorage(row.imageFile)
+
+        const variantPayload = {
+          product_id: productId,
+          option_name: optionName || 'Option',
+          option_value: row.value,
+          image_url: variantImageUrl,
+          quantity_on_hand: Number(row.quantity) || 0,
+          sort_order: index,
+        }
+        if (row.id) {
+          const { error: vErr } = await supabase.from('fundraising_variants').update(variantPayload).eq('id', row.id)
+          if (vErr) throw vErr
+        } else {
+          const { error: vErr } = await supabase.from('fundraising_variants').insert([variantPayload])
+          if (vErr) throw vErr
+        }
+      }
+
       onSaved()
     } catch (err) {
       setError(err.message)
@@ -288,8 +389,12 @@ function ProductFormModal({ product, onClose, onSaved }) {
             </select>
           </div>
           <div className="form-group" style={{ flex: 1 }}>
-            <label className="form-label">Quantity on Hand</label>
-            <input className="form-input" type="number" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} required />
+            <label className="form-label">{hasVariants ? 'Quantity on Hand (total)' : 'Quantity on Hand'}</label>
+            {hasVariants ? (
+              <input className="form-input" type="number" value={variantTotal} disabled style={{ background: 'var(--gray-100)', color: 'var(--gray-600)' }} />
+            ) : (
+              <input className="form-input" type="number" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} required />
+            )}
           </div>
         </div>
         <div className="form-group">
@@ -297,10 +402,57 @@ function ProductFormModal({ product, onClose, onSaved }) {
           <input className="form-input" value={vendor} onChange={e => setVendor(e.target.value)} placeholder="e.g. purchased from [small business name]" />
         </div>
         <div className="form-group">
-          <label className="form-label">Photo</label>
+          <label className="form-label">Cover Photo</label>
           <input type="file" accept="image/*" onChange={handleImageChange} style={{ fontSize: '13px' }} />
           {imagePreview && <img src={imagePreview} alt="" style={{ width: '100%', maxWidth: '200px', borderRadius: '8px', marginTop: '6px', display: 'block' }} />}
+          <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '4px' }}>
+            Used as the main thumbnail. If this product has options below, each option can also have its own photo.
+          </div>
         </div>
+
+        <div className="form-group">
+          <label className="form-label">Options (optional)</label>
+          <input
+            className="form-input"
+            value={optionName}
+            onChange={e => setOptionName(e.target.value)}
+            placeholder="e.g. Color, Size — leave blank if this product has no options"
+            style={{ marginBottom: '10px' }}
+          />
+
+          {activeVariantRows.map(row => (
+            <div key={row.key} style={{ border: '1px solid var(--gray-200)', borderRadius: '8px', padding: '10px', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <div style={{ flex: 2 }}>
+                  <input
+                    className="form-input"
+                    value={row.value}
+                    onChange={e => updateVariantRow(row.key, 'value', e.target.value)}
+                    placeholder="Value, e.g. Black"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="0"
+                    value={row.quantity}
+                    onChange={e => updateVariantRow(row.key, 'quantity', e.target.value)}
+                    placeholder="Stock"
+                  />
+                </div>
+                <button type="button" onClick={() => removeVariantRow(row.key)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '15px', padding: '8px 4px' }}>✕</button>
+              </div>
+              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input type="file" accept="image/*" onChange={e => handleVariantImageChange(row.key, e)} style={{ fontSize: '12px' }} />
+                {row.imagePreview && <img src={row.imagePreview} alt="" style={{ width: '36px', height: '36px', objectFit: 'cover', borderRadius: '6px' }} />}
+              </div>
+            </div>
+          ))}
+
+          <button type="button" className="btn btn-secondary btn-sm" onClick={addVariantRow}>+ Add Option</button>
+        </div>
+
         <label className="checkbox-label" style={{ marginBottom: '10px' }}>
           <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
           Show on the public website fundraising page
