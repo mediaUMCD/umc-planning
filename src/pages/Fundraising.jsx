@@ -471,6 +471,11 @@ function ProductFormModal({ product, onClose, onSaved }) {
 // ── Ledger ─────────────────────────────────────────────────────────────
 function LedgerTable({ transactions, products, onDelete }) {
   const productName = (id) => products.find(p => p.id === id)?.name || '—'
+  const variantLabel = (productId, variantId) => {
+    if (!variantId) return ''
+    const v = products.find(p => p.id === productId)?.variants?.find(v => v.id === variantId)
+    return v ? ` — ${v.option_value}` : ''
+  }
 
   if (transactions.length === 0) {
     return <div className="empty-state"><div className="icon">🧾</div><p>No transactions logged yet.</p></div>
@@ -500,7 +505,7 @@ function LedgerTable({ transactions, products, onDelete }) {
                     {TX_TYPES.find(x => x.value === t.type)?.label.split(' (')[0] || t.type}
                   </span>
                 </td>
-                <td>{t.product_id ? productName(t.product_id) : '—'}</td>
+                <td>{t.product_id ? productName(t.product_id) + variantLabel(t.product_id, t.variant_id) : '—'}</td>
                 <td style={{ fontSize: '13px', color: 'var(--gray-600)' }}>{FUND_LABEL[t.fund_source] || t.fund_source}</td>
                 <td style={{ fontWeight: 700 }}>{money(t.amount)}</td>
                 <td style={{ fontSize: '13px', color: 'var(--gray-600)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.note}</td>
@@ -521,14 +526,24 @@ function TransactionFormModal({ products, onClose, onSaved }) {
   const [amount, setAmount] = useState('')
   const [fundSource, setFundSource] = useState('general')
   const [productId, setProductId] = useState('')
+  const [variantId, setVariantId] = useState('')
   const [quantity, setQuantity] = useState('')
   const [note, setNote] = useState('')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const selectedProduct = products.find(p => p.id === productId)
+  const hasVariants = selectedProduct?.variants?.length > 0
+
+  function handleProductChange(id) {
+    setProductId(id)
+    setVariantId('') // reset — a new product's options don't match the old selection
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
+    if (hasVariants && !variantId) { setError('Please choose which option this transaction is for.'); return }
     setSaving(true)
     setError('')
     try {
@@ -538,6 +553,7 @@ function TransactionFormModal({ products, onClose, onSaved }) {
         amount: Number(amount),
         fund_source: fundSource,
         product_id: productId || null,
+        variant_id: variantId || null,
         quantity: quantity ? Number(quantity) : null,
         note: note || null,
         transaction_date: date,
@@ -548,12 +564,19 @@ function TransactionFormModal({ products, onClose, onSaved }) {
 
       // Keep inventory in sync when a transaction is tied to a product + quantity
       if (productId && quantity) {
-        const product = products.find(p => p.id === productId)
-        if (product) {
-          const delta = type === 'sale' ? -Number(quantity) : type === 'purchase' ? Number(quantity) : 0
-          if (delta !== 0) {
+        const delta = type === 'sale' ? -Number(quantity) : type === 'purchase' ? Number(quantity) : 0
+        if (delta !== 0 && selectedProduct) {
+          if (variantId) {
+            const variant = selectedProduct.variants.find(v => v.id === variantId)
+            const newVariantQty = Math.max(0, Number(variant?.quantity_on_hand || 0) + delta)
+            await supabase.from('fundraising_variants').update({ quantity_on_hand: newVariantQty }).eq('id', variantId)
+
+            // Keep the product's cached total in sync with its options.
+            const newTotal = selectedProduct.variants.reduce((s, v) => s + (v.id === variantId ? newVariantQty : Number(v.quantity_on_hand || 0)), 0)
+            await supabase.from('fundraising_products').update({ quantity_on_hand: newTotal }).eq('id', productId)
+          } else {
             await supabase.from('fundraising_products')
-              .update({ quantity_on_hand: Math.max(0, Number(product.quantity_on_hand || 0) + delta) })
+              .update({ quantity_on_hand: Math.max(0, Number(selectedProduct.quantity_on_hand || 0) + delta) })
               .eq('id', productId)
           }
         }
@@ -593,7 +616,7 @@ function TransactionFormModal({ products, onClose, onSaved }) {
         <div style={{ display: 'flex', gap: '10px' }}>
           <div className="form-group" style={{ flex: 1 }}>
             <label className="form-label">Product (optional)</label>
-            <select className="form-select" value={productId} onChange={e => setProductId(e.target.value)}>
+            <select className="form-select" value={productId} onChange={e => handleProductChange(e.target.value)}>
               <option value="">— None —</option>
               {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -603,10 +626,21 @@ function TransactionFormModal({ products, onClose, onSaved }) {
             <input className="form-input" type="number" min="0" value={quantity} onChange={e => setQuantity(e.target.value)} disabled={!productId} />
           </div>
         </div>
+        {hasVariants && (
+          <div className="form-group">
+            <label className="form-label">Option *</label>
+            <select className="form-select" value={variantId} onChange={e => setVariantId(e.target.value)} required>
+              <option value="">— Choose which option —</option>
+              {selectedProduct.variants.map(v => (
+                <option key={v.id} value={v.id}>{v.option_value} ({v.quantity_on_hand} in stock)</option>
+              ))}
+            </select>
+          </div>
+        )}
         {productId && quantity && (
           <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '-8px', marginBottom: '10px' }}>
-            {type === 'sale' && `This will reduce inventory by ${quantity}.`}
-            {type === 'purchase' && `This will add ${quantity} to inventory.`}
+            {type === 'sale' && `This will reduce inventory by ${quantity}${variantId ? ` for ${selectedProduct.variants.find(v => v.id === variantId)?.option_value}` : ''}.`}
+            {type === 'purchase' && `This will add ${quantity} to inventory${variantId ? ` for ${selectedProduct.variants.find(v => v.id === variantId)?.option_value}` : ''}.`}
           </div>
         )}
         <div className="form-group">
