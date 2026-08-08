@@ -26,6 +26,106 @@ const TX_COLORS = {
 const money = (n) => Number(n || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 const fmtDate = (d) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
+// Exact column order/names required by Zettle's own import template — do not
+// reorder or rename these, or their import will reject the file.
+const ZETTLE_COLUMNS = [
+  'Name', 'Custom unit', 'Non profit (0%)', 'Tax exempt',
+  'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Option3 Name', 'Option3 Value',
+  'SKU', 'Price', 'Cost price', 'Barcode', 'In stock', 'Category',
+  'Variant id', 'Product id', 'ID (Do not edit)',
+]
+
+function csvEscape(val) {
+  const s = val === null || val === undefined ? '' : String(val)
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function downloadCsv(filename, rows) {
+  const csv = [ZETTLE_COLUMNS.join(','), ...rows.map(r => ZETTLE_COLUMNS.map(c => csvEscape(r[c])).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// Fundraising items (this app) always have a known shape — variant rows get
+// their own line so Zettle can track each option's stock separately.
+function fundraisingRowsToZettle(products) {
+  const rows = []
+  for (const p of products) {
+    if (p.variants && p.variants.length > 0) {
+      for (const v of p.variants) {
+        rows.push({
+          'Name': p.name, 'Price': p.sale_price || 0, 'Cost price': p.cost || 0,
+          'Option1 Name': 'Option', 'Option1 Value': v.option_value,
+          'In stock': v.quantity_on_hand ?? 0, 'Category': 'Fundraising',
+        })
+      }
+    } else {
+      rows.push({
+        'Name': p.name, 'Price': p.sale_price || 0, 'Cost price': p.cost || 0,
+        'In stock': p.quantity_on_hand ?? 0, 'Category': 'Fundraising',
+      })
+    }
+  }
+  return rows
+}
+
+// umc-store products — verified against that app's actual AdminProducts.jsx.
+// Wrapped so a schema mismatch here doesn't take down the fundraising half
+// of the export.
+async function storeRowsToZettle() {
+  const [{ data: products, error: pErr }, { data: colors, error: cErr }, { data: productColors, error: pcErr }] = await Promise.all([
+    supabase.from('products').select('*').eq('active', true),
+    supabase.from('colors').select('id, name'),
+    supabase.from('product_colors').select('product_id, color_id, available_sizes'),
+  ])
+  if (pErr) throw pErr
+  if (cErr) throw cErr
+  if (pcErr) throw pcErr
+
+  const colorName = Object.fromEntries((colors || []).map(c => [c.id, c.name]))
+  const colorsByProduct = {}
+  for (const pc of productColors || []) {
+    if (!colorsByProduct[pc.product_id]) colorsByProduct[pc.product_id] = []
+    colorsByProduct[pc.product_id].push(pc)
+  }
+
+  const rows = []
+  for (const p of products || []) {
+    const pColors = colorsByProduct[p.id] || []
+    const category = p.category || 'Church Swag'
+    const priceFor = (size) => (size && p.size_price_overrides?.[size] != null) ? p.size_price_overrides[size] : (p.base_price || 0)
+
+    if (pColors.length === 0) {
+      // No colors — just sizes (or a single plain item if no sizes either).
+      const sizes = p.sizes?.length > 0 ? p.sizes : [null]
+      for (const size of sizes) {
+        rows.push({
+          'Name': p.name, 'Price': priceFor(size), 'Category': category,
+          ...(size ? { 'Option1 Name': 'Size', 'Option1 Value': size } : {}),
+        })
+      }
+    } else {
+      for (const pc of pColors) {
+        // Each color can restrict which sizes it comes in; falls back to the
+        // product's full size list when a color has no restriction set.
+        const sizes = pc.available_sizes?.length > 0 ? pc.available_sizes : (p.sizes?.length > 0 ? p.sizes : [null])
+        for (const size of sizes) {
+          rows.push({
+            'Name': p.name, 'Price': priceFor(size), 'Category': category,
+            'Option1 Name': 'Color', 'Option1 Value': colorName[pc.color_id] || '',
+            ...(size ? { 'Option2 Name': 'Size', 'Option2 Value': size } : {}),
+          })
+        }
+      }
+    }
+  }
+  return rows
+}
+
 async function uploadToStorage(file) {
   const ext = file.name.split('.').pop()
   const fileName = `${crypto.randomUUID()}.${ext}`
@@ -51,6 +151,21 @@ export default function Fundraising() {
   const [showProductForm, setShowProductForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null) // null = add mode
   const [showTxForm, setShowTxForm] = useState(false)
+  const [exportingZettle, setExportingZettle] = useState(false)
+  const [exportError, setExportError] = useState('')
+
+  async function handleExportZettle() {
+    setExportingZettle(true)
+    setExportError('')
+    const rows = fundraisingRowsToZettle(products)
+    try {
+      rows.push(...await storeRowsToZettle())
+    } catch (err) {
+      setExportError(`Church swag items couldn't be included (${err.message}) — exported fundraising items only.`)
+    }
+    downloadCsv(`zettle-import-${new Date().toISOString().slice(0, 10)}.csv`, rows)
+    setExportingZettle(false)
+  }
 
   useEffect(() => { load() }, [])
 
@@ -121,11 +236,20 @@ export default function Fundraising() {
           </div>
         </div>
         {tab === 'inventory' ? (
-          <button className="btn btn-primary" onClick={openAddProduct}>+ Add Product</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={handleExportZettle} disabled={exportingZettle}>
+              {exportingZettle ? 'Exporting…' : '📤 Export to Zettle CSV'}
+            </button>
+            <button className="btn btn-primary" onClick={openAddProduct}>+ Add Product</button>
+          </div>
         ) : (
           <button className="btn btn-primary" onClick={() => setShowTxForm(true)}>+ Log Transaction</button>
         )}
       </div>
+
+      {exportError && (
+        <div className="alert alert-error" style={{ margin: '0 24px 12px' }}>{exportError}</div>
+      )}
 
       <div className="page-body">
         {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
