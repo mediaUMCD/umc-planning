@@ -40,6 +40,7 @@ export default function HymnTracker() {
   const [newHymnal, setNewHymnal] = useState('UMH')
   const [newNumber, setNewNumber] = useState('')
   const [newTitle, setNewTitle] = useState('')
+  const [newTuneName, setNewTuneName] = useState('')
   const [addingHymn, setAddingHymn] = useState(false)
   const [addHymnError, setAddHymnError] = useState(null)
 
@@ -51,6 +52,13 @@ export default function HymnTracker() {
   const [uploading, setUploading] = useState(false)
   const [uploadSeconds, setUploadSeconds] = useState(0)
   const [fileError, setFileError] = useState(null)
+
+  // Melody / tune section
+  const [tuneName, setTuneName] = useState('')
+  const [melodyNotes, setMelodyNotes] = useState('')
+  const [savingTuneInfo, setSavingTuneInfo] = useState(false)
+  const [tuneInfoError, setTuneInfoError] = useState(null)
+  const [tuneInfoSaved, setTuneInfoSaved] = useState(false)
 
   useEffect(() => { loadHymns() }, [])
 
@@ -68,6 +76,10 @@ async function loadHymnHistory(hymn) {
     setSelectedHymn(hymn)
     setToggleError(null)
     setFileError(null)
+    setTuneInfoError(null)
+    setTuneInfoSaved(false)
+    setTuneName(hymn.tune_name || '')
+    setMelodyNotes(hymn.melody_notes || '')
     setHistoryLoading(true)
     const { data } = await supabase
       .from('service_hymns')
@@ -122,17 +134,45 @@ async function loadHymnHistory(hymn) {
     try {
       const { data, error } = await supabase
         .from('hymns')
-        .insert([{ hymnal: newHymnal, number: parseInt(newNumber), title: newTitle, is_created: false }])
+        .insert([{
+          hymnal: newHymnal,
+          number: parseInt(newNumber),
+          title: newTitle,
+          tune_name: newTuneName.trim() || null,
+          is_created: false,
+        }])
         .select()
         .single()
       if (error) throw error
       setHymns(prev => [...prev, data].sort((a, b) => parseFloat(a.number) - parseFloat(b.number)))
-      setNewHymnal('UMH'); setNewNumber(''); setNewTitle('')
+      setNewHymnal('UMH'); setNewNumber(''); setNewTitle(''); setNewTuneName('')
       setShowAddHymn(false)
     } catch (err) {
       setAddHymnError(err.message)
     }
     setAddingHymn(false)
+  }
+
+  async function handleSaveTuneInfo() {
+    if (!selectedHymn) return
+    setSavingTuneInfo(true)
+    setTuneInfoError(null)
+    setTuneInfoSaved(false)
+    const cleanTune = tuneName.trim() || null
+    const cleanNotes = melodyNotes.trim() || null
+    const { error } = await supabase
+      .from('hymns')
+      .update({ tune_name: cleanTune, melody_notes: cleanNotes })
+      .eq('id', selectedHymn.id)
+    if (error) {
+      setTuneInfoError(`Couldn't save: ${error.message}`)
+    } else {
+      setHymns(prev => prev.map(h => h.id === selectedHymn.id ? { ...h, tune_name: cleanTune, melody_notes: cleanNotes } : h))
+      setSelectedHymn(h => ({ ...h, tune_name: cleanTune, melody_notes: cleanNotes }))
+      setTuneInfoSaved(true)
+      setTimeout(() => setTuneInfoSaved(false), 2000)
+    }
+    setSavingTuneInfo(false)
   }
 
   async function handleUploadFile(e) {
@@ -186,8 +226,25 @@ async function loadHymnHistory(hymn) {
     return map[color] || '#5c5850'
   }
 
+  // Distinct tune names across the library, for autocomplete — keeps spelling
+  // consistent so "AZMON" doesn't end up entered three different ways.
+  const uniqueTuneNames = [...new Set(hymns.map(h => h.tune_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+
+  // Other hymns that share the currently-selected hymn's tune name.
+  const matchingTuneHymns = selectedHymn?.tune_name
+    ? hymns.filter(h =>
+        h.id !== selectedHymn.id &&
+        h.tune_name &&
+        h.tune_name.trim().toLowerCase() === selectedHymn.tune_name.trim().toLowerCase()
+      )
+    : []
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+
+      <datalist id="tune-names-list">
+        {uniqueTuneNames.map(t => <option key={t} value={t} />)}
+      </datalist>
 
       {/* Left panel — hymn list */}
       <div style={{ width: '420px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--gray-100)', background: 'white' }}>
@@ -211,6 +268,14 @@ async function loadHymnHistory(hymn) {
                 <input type="number" value={newNumber} onChange={e => setNewNumber(e.target.value)} placeholder="Number" required style={{ padding: '6px 8px', fontSize: '12px', width: '80px' }} />
                 <input type="text" value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Title" required style={{ padding: '6px 8px', fontSize: '12px', flex: 1 }} />
               </div>
+              <input
+                type="text"
+                list="tune-names-list"
+                value={newTuneName}
+                onChange={e => setNewTuneName(e.target.value)}
+                placeholder="Tune name (optional, e.g. AZMON)"
+                style={{ padding: '6px 8px', fontSize: '12px', width: '100%', marginBottom: '6px' }}
+              />
               {addHymnError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addHymnError}</div>}
               <button type="submit" className="btn btn-primary btn-sm" disabled={addingHymn} style={{ width: '100%' }}>
                 {addingHymn ? 'Adding…' : 'Add Hymn'}
@@ -288,6 +353,11 @@ async function loadHymnHistory(hymn) {
               <span style={{ fontSize: '13px', color: 'var(--gray-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                 {hymn.title}
               </span>
+
+              {/* Tune indicator */}
+              {hymn.tune_name && (
+                <span title={`Tune: ${hymn.tune_name}`} style={{ fontSize: '12px', flexShrink: 0, opacity: 0.6 }}>🎼</span>
+              )}
             </div>
           ))}
         </div>
@@ -307,7 +377,7 @@ async function loadHymnHistory(hymn) {
             <div className="card" style={{ marginBottom: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
                     <span style={{
                       fontSize: '12px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px',
                       background: selectedHymn.hymnal === 'UMH' ? 'var(--burgundy-light)' : '#e3f2fd',
@@ -315,6 +385,14 @@ async function loadHymnHistory(hymn) {
                     }}>
                       {selectedHymn.hymnal} #{selectedHymn.number}
                     </span>
+                    {selectedHymn.tune_name && (
+                      <span style={{
+                        fontSize: '12px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px',
+                        background: 'var(--gray-100)', color: 'var(--gray-600)',
+                      }}>
+                        🎼 {selectedHymn.tune_name}
+                      </span>
+                    )}
                     {hymnHistory.length > 0 && (
                       <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
                         Last played: {formatDate(hymnHistory[0]?.service_dates?.service_date)}
@@ -359,6 +437,76 @@ async function loadHymnHistory(hymn) {
                   <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>Days since played</div>
                 </div>
               </div>
+            </div>
+
+            {/* Melody / tune tracker */}
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '14px', color: 'var(--gray-800)' }}>
+                🎼 Melody / Tune
+              </h3>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                <div style={{ flex: '1', minWidth: '200px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>
+                    Tune Name
+                  </label>
+                  <input
+                    type="text"
+                    list="tune-names-list"
+                    value={tuneName}
+                    onChange={e => setTuneName(e.target.value)}
+                    placeholder="e.g. AZMON, HYFRYDOL"
+                    style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>
+                  Melody Notes
+                </label>
+                <textarea
+                  value={melodyNotes}
+                  onChange={e => setMelodyNotes(e.target.value)}
+                  placeholder="e.g. Same tune as 'O for a Thousand Tongues'"
+                  rows={2}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleSaveTuneInfo}
+                  disabled={savingTuneInfo || (tuneName === (selectedHymn.tune_name || '') && melodyNotes === (selectedHymn.melody_notes || ''))}
+                >
+                  {savingTuneInfo ? 'Saving…' : 'Save'}
+                </button>
+                {tuneInfoSaved && <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>✓ Saved</span>}
+              </div>
+              {tuneInfoError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>{tuneInfoError}</div>}
+
+              {matchingTuneHymns.length > 0 && (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--gray-100)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gray-600)', marginBottom: '8px' }}>
+                    Also uses this tune ({matchingTuneHymns.length}):
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {matchingTuneHymns.map(h => (
+                      <div
+                        key={h.id}
+                        onClick={() => loadHymnHistory(h)}
+                        style={{
+                          fontSize: '13px', color: 'var(--burgundy)', cursor: 'pointer',
+                          padding: '4px 8px', borderRadius: '4px', background: 'var(--gray-50)',
+                        }}
+                      >
+                        {h.hymnal} #{h.number} — {h.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Files / versions — backup library */}
