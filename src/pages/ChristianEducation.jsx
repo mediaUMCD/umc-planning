@@ -158,7 +158,21 @@ export default function ChristianEducation() {
   const [importResult, setImportResult] = useState(null)
   const fileInputRef = useRef(null)
 
-  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers() }, [])
+  // Series
+  const [seriesList, setSeriesList] = useState([])
+  const [loadingSeries, setLoadingSeries] = useState(true)
+  const [expandedSeriesId, setExpandedSeriesId] = useState(null)
+  const [showNewSeries, setShowNewSeries] = useState(false)
+  const [newSeriesClassId, setNewSeriesClassId] = useState('')
+  const [newSeriesName, setNewSeriesName] = useState('')
+  const [newSeriesDescription, setNewSeriesDescription] = useState('')
+  const [newSeriesCategory, setNewSeriesCategory] = useState('lesson')
+  const [newSeriesTemplateId, setNewSeriesTemplateId] = useState('')
+  const [newSeriesDates, setNewSeriesDates] = useState([{ date: '', title: '', info: '' }])
+  const [savingSeries, setSavingSeries] = useState(false)
+  const [seriesError, setSeriesError] = useState(null)
+
+  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries() }, [])
 
   async function loadClasses() {
     setLoadingClasses(true)
@@ -193,6 +207,78 @@ export default function ChristianEducation() {
       .select('people(*)')
       .eq('tag_id', tagId)
     setTeachers((data || []).map(row => row.people).filter(Boolean).sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '')))
+  }
+
+  async function loadSeries() {
+    setLoadingSeries(true)
+    const { data } = await supabase
+      .from('ce_series')
+      .select('*, ce_classes(name), ce_sessions(id, session_date, topic)')
+      .order('created_at', { ascending: false })
+    setSeriesList(data || [])
+    setLoadingSeries(false)
+  }
+
+  function addSeriesDateRow() {
+    setNewSeriesDates(prev => [...prev, { date: '', title: '', info: '' }])
+  }
+  function updateSeriesDateRow(idx, patch) {
+    setNewSeriesDates(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
+  }
+  function removeSeriesDateRow(idx) {
+    setNewSeriesDates(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  async function handleCreateSeries(e) {
+    e.preventDefault()
+    setSavingSeries(true)
+    setSeriesError(null)
+    try {
+      const validDates = newSeriesDates.filter(r => r.date)
+      if (validDates.length === 0) throw new Error('Add at least one date.')
+
+      const sortedDates = [...validDates].sort((a, b) => a.date.localeCompare(b.date))
+      const { data: series, error: seriesErr } = await supabase
+        .from('ce_series')
+        .insert([{
+          class_id: newSeriesClassId,
+          name: newSeriesName,
+          description: newSeriesDescription || null,
+          start_date: sortedDates[0].date,
+          end_date: sortedDates[sortedDates.length - 1].date,
+        }])
+        .select()
+        .single()
+      if (seriesErr) throw seriesErr
+
+      const sessionsToInsert = validDates.map(r => ({
+        class_id: newSeriesClassId,
+        series_id: series.id,
+        session_date: r.date,
+        topic: r.title || null,
+        curriculum_notes: r.info || null,
+        category: newSeriesCategory,
+        template_id: newSeriesTemplateId || null,
+      }))
+      const { error: sessionsErr } = await supabase.from('ce_sessions').insert(sessionsToInsert)
+      if (sessionsErr) throw sessionsErr
+
+      setNewSeriesClassId(''); setNewSeriesName(''); setNewSeriesDescription('')
+      setNewSeriesCategory('lesson'); setNewSeriesTemplateId('')
+      setNewSeriesDates([{ date: '', title: '', info: '' }])
+      setShowNewSeries(false)
+      loadSeries()
+      if (selectedClass?.id === newSeriesClassId) selectClass(selectedClass)
+    } catch (err) {
+      setSeriesError(err.message)
+    }
+    setSavingSeries(false)
+  }
+
+  async function handleDeleteSeries(series) {
+    if (!confirm(`Delete "${series.name}"? This removes the series and all ${series.ce_sessions?.length || 0} of its sessions.`)) return
+    await supabase.from('ce_series').delete().eq('id', series.id)
+    setSeriesList(prev => prev.filter(s => s.id !== series.id))
   }
 
   async function handleSearchPeople(e) {
@@ -985,6 +1071,127 @@ export default function ChristianEducation() {
           </div>
         </div>
       </div>
+      ) : view === 'series' ? (
+
+      /* ============ SERIES VIEW ============ */
+      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
+        <div style={{ padding: '24px', maxWidth: '720px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)' }}>Series</h1>
+              <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
+                A named set of dated sessions — Bible study, or anything else. Creating one emails {' '}
+                <span style={{ fontWeight: 600 }}>media@umcdanielson.org</span> automatically so it gets advertised.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowNewSeries(s => !s)}>
+                {showNewSeries ? '✕ Cancel' : '+ New Series'}
+              </button>
+            </div>
+          </div>
+
+          {showNewSeries && (
+            <form onSubmit={handleCreateSeries} className="card" style={{ marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px', color: 'var(--gray-800)' }}>New Series</h3>
+
+              <div className="grid-2" style={{ marginBottom: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Class</label>
+                  <select value={newSeriesClassId} onChange={e => setNewSeriesClassId(e.target.value)} required style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}>
+                    <option value="">— Select class —</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Series Name</label>
+                  <input type="text" value={newSeriesName} onChange={e => setNewSeriesName(e.target.value)} required placeholder="e.g. Fall Bible Study: Romans"
+                    style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Description (optional)</label>
+                <textarea value={newSeriesDescription} onChange={e => setNewSeriesDescription(e.target.value)} rows={2} placeholder="Overview shown in the alert email"
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
+              </div>
+
+              <div className="grid-2" style={{ marginBottom: '14px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Category (applies to every date)</label>
+                  <select value={newSeriesCategory} onChange={e => { setNewSeriesCategory(e.target.value); setNewSeriesTemplateId('') }} style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}>
+                    {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Template (optional)</label>
+                  <select value={newSeriesTemplateId} onChange={e => setNewSeriesTemplateId(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}>
+                    <option value="">No template</option>
+                    {templatesForCategory(newSeriesCategory).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '6px' }}>Dates</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                {newSeriesDates.map((row, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', background: 'var(--gray-50)', padding: '8px', borderRadius: '6px' }}>
+                    <input type="date" value={row.date} onChange={e => updateSeriesDateRow(idx, { date: e.target.value })}
+                      style={{ width: '150px', padding: '6px 8px', fontSize: '12px', flexShrink: 0 }} />
+                    <input type="text" value={row.title} onChange={e => updateSeriesDateRow(idx, { title: e.target.value })} placeholder="Title for this date"
+                      style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }} />
+                    <textarea value={row.info} onChange={e => updateSeriesDateRow(idx, { info: e.target.value })} placeholder="Info / details" rows={1}
+                      style={{ flex: 2, padding: '6px 8px', fontSize: '12px', minHeight: '34px', resize: 'vertical' }} />
+                    <button type="button" onClick={() => removeSeriesDateRow(idx)}
+                      style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, marginTop: '6px' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addSeriesDateRow} style={{ marginBottom: '14px' }}>+ Add Date</button>
+
+              {seriesError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '10px' }}>{seriesError}</div>}
+              <button type="submit" className="btn btn-primary btn-sm" disabled={savingSeries || !newSeriesClassId || !newSeriesName}>
+                {savingSeries ? 'Creating…' : 'Create Series'}
+              </button>
+            </form>
+          )}
+
+          {loadingSeries ? <div className="spinner" /> : seriesList.length === 0 ? (
+            <div className="empty-state"><div className="icon">📖</div><p>No series yet.</p></div>
+          ) : seriesList.map(series => {
+            const sortedSessions = [...(series.ce_sessions || [])].sort((a, b) => a.session_date.localeCompare(b.session_date))
+            const expanded = expandedSeriesId === series.id
+            return (
+              <div key={series.id} className="card" style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ cursor: 'pointer', flex: 1 }} onClick={() => setExpandedSeriesId(expanded ? null : series.id)}>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--gray-800)' }}>{series.name}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                      {series.ce_classes?.name} · {sortedSessions.length} date{sortedSessions.length === 1 ? '' : 's'}
+                      {series.start_date && series.end_date && ` · ${series.start_date} to ${series.end_date}`}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDeleteSeries(series)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
+                    Delete
+                  </button>
+                </div>
+                {series.description && <div style={{ fontSize: '13px', color: 'var(--gray-600)', marginTop: '8px' }}>{series.description}</div>}
+                {expanded && (
+                  <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--gray-100)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {sortedSessions.map(s => (
+                      <div key={s.id} style={{ fontSize: '13px', color: 'var(--gray-800)' }}>
+                        <strong>{new Date(s.session_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+                        {s.topic ? ` — ${s.topic}` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
       ) : (
       <>
       {/* ============ CLASSES / SESSIONS VIEW ============ */}
@@ -1003,9 +1210,12 @@ export default function ChristianEducation() {
               🗂️ Templates
             </button>
           </div>
-          <div style={{ marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('teachers')} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('teachers')} style={{ flex: 1 }}>
               🏷️ Teachers ({teachers.length})
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('series')} style={{ flex: 1 }}>
+              📖 Series
             </button>
           </div>
 
