@@ -1,145 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
+import BulkAddSundaysModal from '../components/BulkAddSundaysModal.jsx'
 import { getSundayNumber } from '../lib/sundayNumber.js'
+import { SEASONS, getSeasonColor, getSeasonStyle, getSeasonFromDate } from '../lib/liturgicalCalendar.js'
 
 const PREACHERS = ['Pastor Zach', 'Guest Speaker', 'Other']
 const STORYTELLERS = ['Chrissy', 'Cassi', 'Sue', 'Cyndi', 'Betsy', 'Pastor Zach', 'Kids', 'Other']
 const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'KJV', 'MSG', 'RSV', 'OTHER']
 const SERVICE_TYPES = ['Regular Sunday', 'Communion Sunday', 'Advent', 'Christmas Eve', 'Ash Wednesday', 'Maundy Thursday', 'Good Friday', 'Easter', 'Pentecost', 'Rally Day', 'Lessons & Carols', 'Special Service']
 const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900])
-
-const SEASONS = [
-  { name: '1st Sunday of Advent', color: 'Purple' },
-  { name: '2nd Sunday of Advent', color: 'Purple' },
-  { name: '3rd Sunday of Advent', color: 'Purple' },
-  { name: '4th Sunday of Advent', color: 'Purple' },
-  { name: 'Christmas', color: 'White' },
-  { name: 'Baptism of the Lord', color: 'White' },
-  { name: '1st Sunday after Epiphany', color: 'White' },
-  { name: '2nd Sunday after Epiphany', color: 'Green' },
-  { name: '3rd Sunday after Epiphany', color: 'Green' },
-  { name: '4th Sunday after Epiphany', color: 'Green' },
-  { name: '5th Sunday after Epiphany', color: 'Green' },
-  { name: '6th Sunday after Epiphany', color: 'Green' },
-  { name: '7th Sunday after Epiphany', color: 'Green' },
-  { name: '8th Sunday after Epiphany', color: 'Green' },
-  { name: 'Transfiguration Sunday', color: 'White' },
-  { name: 'Ash Wednesday', color: 'Grey' },
-  { name: '1st Sunday of Lent', color: 'Purple' },
-  { name: '2nd Sunday of Lent', color: 'Purple' },
-  { name: '3rd Sunday of Lent', color: 'Purple' },
-  { name: '4th Sunday of Lent', color: 'Purple' },
-  { name: '5th Sunday of Lent', color: 'Purple' },
-  { name: 'Palm/Passion Sunday', color: 'Green' },
-  { name: 'Maundy Thursday', color: 'Purple' },
-  { name: 'Good Friday', color: 'Purple' },
-  { name: 'Easter Sunday', color: 'White' },
-  { name: '2nd Sunday of Easter', color: 'White' },
-  { name: '3rd Sunday of Easter', color: 'White' },
-  { name: '4th Sunday of Easter', color: 'White' },
-  { name: '5th Sunday of Easter', color: 'White' },
-  { name: '6th Sunday of Easter', color: 'White' },
-  { name: 'Ascension Sunday', color: 'White' },
-  { name: '7th Sunday of Easter', color: 'White' },
-  { name: 'Pentecost', color: 'Red' },
-  { name: 'Trinity Sunday', color: 'White' },
-  { name: 'Season after Pentecost', color: 'Green' },
-  { name: 'Rally Day', color: 'Green' },
-  { name: 'All Saints Day', color: 'White' },
-  { name: 'Thanksgiving', color: 'Green' },
-  { name: 'Christ the King Sunday', color: 'White' },
-]
-
-function getSeasonColor(season) {
-  const found = SEASONS.find(s => s.name === season)
-  return found ? found.color : ''
-}
-
-function getSeasonStyle(color) {
-  const map = {
-    'Purple': { bg: '#f3e5f5', color: '#6B2D8B' },
-    'White': { bg: '#fff8e7', color: '#b8860b' },
-    'Green': { bg: '#e8f5ee', color: '#2d7a4f' },
-    'Red': { bg: '#fdecea', color: '#c0392b' },
-    'Grey': { bg: '#f0f0f0', color: '#666' },
-  }
-  return map[color] || { bg: '#f0ede8', color: '#5c5850' }
-}
-
-function getSeasonFromDate(dateStr) {
-  if (!dateStr) return { season: '', color: '' }
-  const d = new Date(dateStr + 'T12:00:00')
-  const year = d.getFullYear()
-
-  function easter(y) {
-    const a = y % 19, b = Math.floor(y / 100), c = y % 100
-    const d2 = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25)
-    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d2 - g + 15) % 30
-    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7
-    const m = Math.floor((a + 11 * h + 22 * l) / 451)
-    const month = Math.floor((h + l - 7 * m + 114) / 31)
-    const day = ((h + l - 7 * m + 114) % 31) + 1
-    return new Date(y, month - 1, day)
-  }
-
-  const e = easter(year)
-  const addDays = (dt, n) => new Date(dt.getTime() + n * 86400000)
-  const sameDay = (a, b) => a.toDateString() === b.toDateString()
-
-  const ashWed = addDays(e, -46)
-  const palmSunday = addDays(e, -7)
-  const maundyThursday = addDays(e, -3)
-  const goodFriday = addDays(e, -2)
-  const pentecost = addDays(e, 49)
-  const trinity = addDays(pentecost, 7)
-  const christmas = new Date(year, 11, 25)
-  const christmasDow = christmas.getDay()
-  const advent1 = addDays(christmas, -(christmasDow === 0 ? 28 : christmasDow + 21))
-
-  if (sameDay(d, goodFriday)) return { season: 'Good Friday', color: 'Purple' }
-  if (sameDay(d, maundyThursday)) return { season: 'Maundy Thursday', color: 'Purple' }
-  if (sameDay(d, palmSunday)) return { season: 'Palm/Passion Sunday', color: 'Green' }
-  if (sameDay(d, e)) return { season: 'Easter Sunday', color: 'White' }
-  if (sameDay(d, pentecost)) return { season: 'Pentecost', color: 'Red' }
-  if (sameDay(d, trinity)) return { season: 'Trinity Sunday', color: 'White' }
-  if (sameDay(d, ashWed)) return { season: 'Ash Wednesday', color: 'Grey' }
-
-  if (d >= advent1 && d < new Date(year, 11, 26)) {
-    const week = Math.floor((d - advent1) / 86400000 / 7) + 1
-    return { season: `${['1st','2nd','3rd','4th'][week-1]} Sunday of Advent`, color: 'Purple' }
-  }
-  if (d >= new Date(year, 11, 26) || d <= new Date(year, 0, 5)) return { season: 'Christmas', color: 'White' }
-
-  const epiphany = new Date(year, 0, 6)
-  const transfiguration = addDays(ashWed, -3)
-  if (d >= epiphany && d <= transfiguration) {
-    if (sameDay(d, transfiguration)) return { season: 'Transfiguration Sunday', color: 'White' }
-    const week = Math.floor((d - epiphany) / 86400000 / 7)
-    if (week === 0) return { season: 'Baptism of the Lord', color: 'White' }
-    return { season: `${['1st','2nd','3rd','4th','5th','6th','7th','8th'][week]} Sunday after Epiphany`, color: week === 0 ? 'White' : 'Green' }
-  }
-
-  if (d > ashWed && d < palmSunday) {
-    const week = Math.floor((d - ashWed) / 86400000 / 7) + 1
-    return { season: `${['1st','2nd','3rd','4th','5th'][week-1]} Sunday of Lent`, color: 'Purple' }
-  }
-
-  if (d > e && d < pentecost) {
-    const week = Math.floor((d - e) / 86400000 / 7)
-    return { season: `${['2nd','3rd','4th','5th','6th','7th'][week-1]} Sunday of Easter`, color: 'White' }
-  }
-
-  if (d > pentecost) {
-    const christKing = addDays(advent1, -7)
-    if (sameDay(d, christKing)) return { season: 'Christ the King Sunday', color: 'White' }
-    if (d.getMonth() === 8 && d.getDate() <= 7) return { season: 'Rally Day', color: 'Green' }
-    if (d.getMonth() === 10 && d.getDate() <= 7) return { season: 'All Saints Day', color: 'White' }
-    return { season: 'Season after Pentecost', color: 'Green' }
-  }
-
-  return { season: '', color: '' }
-}
 
 function buildBibleGatewayUrl(reference, version) {
   return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${encodeURIComponent(version || 'CEB')}`
@@ -506,6 +377,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [filter, setFilter] = useState('upcoming')
   const [searchDate, setSearchDate] = useState('')
   const [editingService, setEditingService] = useState(null)
+  const [showBulkAdd, setShowBulkAdd] = useState(false)
   const [hymns, setHymns] = useState([])
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -812,6 +684,85 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       if (filter === 'past' && !searchDate) return b.service_date.localeCompare(a.service_date)
       return a.service_date.localeCompare(b.service_date)
     })
+
+  const EXCEL_FILL = { 'Purple': 'D9C2E9', 'White': 'FFF8E7', 'Green': 'C6E5C0', 'Red': 'F2C4C4', 'Grey': 'E0E0E0' }
+  const EXCEL_FONT = { 'Purple': '6B2D8B', 'White': 'B8860B', 'Green': '2D7A4F', 'Red': 'C0392B', 'Grey': '5C5850' }
+
+  function csvEscape(val) {
+    const s = (val ?? '').toString()
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+
+  function handleExportCsv() {
+    const headers = ['Date', 'Day', 'Season', 'Liturgical Color', 'Special Description', 'Service Type', 'Spark Title', 'Hymns', 'Communion']
+    const rows = filteredServices.map(s => [
+      s.service_date,
+      new Date(s.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+      s.season || '', s.liturgical_color || '', s.special_designation || '',
+      s.service_type || '', s.spark_title || '',
+      s.service_hymns?.length || 0, s.is_communion ? 'Yes' : '',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `umcd-service-dates-${today}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleExportExcel() {
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'UMCD Planning Hub'
+    wb.created = new Date()
+    const ws = wb.addWorksheet('Service Dates')
+    ws.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Day', key: 'day', width: 12 },
+      { header: 'Season', key: 'season', width: 28 },
+      { header: 'Color', key: 'color', width: 10 },
+      { header: 'Special Description', key: 'special', width: 32 },
+      { header: 'Service Type', key: 'type', width: 18 },
+      { header: 'Spark Title', key: 'spark', width: 28 },
+      { header: 'Hymns', key: 'hymns', width: 8 },
+      { header: 'Communion', key: 'communion', width: 12 },
+    ]
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+
+    for (const s of filteredServices) {
+      const row = ws.addRow({
+        date: s.service_date,
+        day: new Date(s.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+        season: s.season || '',
+        color: s.liturgical_color || '',
+        special: s.special_designation || '',
+        type: s.service_type || '',
+        spark: s.spark_title || '',
+        hymns: s.service_hymns?.length || 0,
+        communion: s.is_communion ? 'Yes' : '',
+      })
+      const fill = EXCEL_FILL[s.liturgical_color]
+      const font = EXCEL_FONT[s.liturgical_color]
+      if (fill) {
+        row.eachCell(cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${fill}` } } })
+      }
+      if (font) row.getCell('color').font = { color: { argb: `FF${font}` }, bold: true }
+      if (s.special_designation) row.getCell('special').font = { bold: true }
+    }
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `umcd-service-dates-${today}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // ── EDIT VIEW ──
   if (view === 'edit') {
@@ -1324,7 +1275,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     <div>
       <div className="page-header">
         <h1 className="page-title">Service Planner</h1>
-        <button className="btn btn-primary" onClick={startNew}>+ New Service</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary" onClick={() => setShowBulkAdd(true)}>📅 Bulk Add Sundays</button>
+          <button className="btn btn-primary" onClick={startNew}>+ New Service</button>
+        </div>
       </div>
       <div className="page-body">
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1338,6 +1292,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--gray-600)', whiteSpace: 'nowrap' }}>Jump to date:</label>
             <input type="date" value={searchDate} onChange={e => setSearchDate(e.target.value)} style={{ width: '160px', padding: '6px 10px', fontSize: '13px' }} />
             {searchDate && <button className="btn btn-secondary btn-sm" onClick={() => setSearchDate('')}>Clear</button>}
+            <button className="btn btn-secondary btn-sm" onClick={handleExportCsv} disabled={filteredServices.length === 0}>⬇ CSV</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleExportExcel} disabled={filteredServices.length === 0}>📊 Excel</button>
           </div>
         </div>
 
@@ -1392,6 +1348,15 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           </div>
         )}
       </div>
+
+      {showBulkAdd && (
+        <BulkAddSundaysModal
+          existingDates={services.map(s => s.service_date)}
+          getSeasonFromDate={getSeasonFromDate}
+          onClose={() => setShowBulkAdd(false)}
+          onSaved={loadServices}
+        />
+      )}
     </div>
   )
 }

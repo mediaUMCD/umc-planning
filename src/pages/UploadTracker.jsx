@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 import { getSundayNumber } from '../lib/sundayNumber.js'
 
@@ -259,6 +260,96 @@ export default function UploadTracker() {
     XLSX.writeFile(wb, `upload-tracker-${filter}-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
+  // ── Clean report export (separate from the round-trip bulk-edit
+  //    template above) — for viewing/printing/sharing, not re-importing.
+  const REPORT_FILL = { 'Purple': 'D9C2E9', 'White': 'FFF8E7', 'Green': 'C6E5C0', 'Red': 'F2C4C4', 'Grey': 'E0E0E0' }
+  const REPORT_FONT = { 'Purple': '6B2D8B', 'White': 'B8860B', 'Green': '2D7A4F', 'Red': 'C0392B', 'Grey': '5C5850' }
+
+  function statusLabel(svc, t) {
+    const tracker = getTracker(svc, t.key)
+    if (!tracker) return ''
+    if (tracker.is_na) return 'N/A'
+    const isPodcast = t.key.startsWith('podcast')
+    const done = isPodcast ? tracker.podcast_published : tracker.is_uploaded
+    return done ? '✓' : ''
+  }
+
+  function csvEscape(val) {
+    const s = (val ?? '').toString()
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+
+  function handleExportReportCsv() {
+    const headers = ['Date', 'Day', 'Season', 'Special Description', 'Sermon Title', ...UPLOAD_TYPES.map(t => t.label), 'Sermon Approval', 'Music Approval']
+    const rows = services.map(svc => [
+      svc.service_date,
+      new Date(svc.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+      svc.season || '', svc.special_designation || '', svc.spark_title || '',
+      ...UPLOAD_TYPES.map(t => statusLabel(svc, t)),
+      svc.sermon_approval_status || 'draft', svc.music_approval_status || 'draft',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `upload-tracker-report-${filter}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleExportReportExcel() {
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'UMCD Planning Hub'
+    wb.created = new Date()
+    const ws = wb.addWorksheet('Upload Tracker')
+    ws.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Day', key: 'day', width: 12 },
+      { header: 'Season', key: 'season', width: 26 },
+      { header: 'Special Description', key: 'special', width: 28 },
+      { header: 'Sermon Title', key: 'spark', width: 26 },
+      ...UPLOAD_TYPES.map(t => ({ header: t.label, key: t.key, width: 14 })),
+      { header: 'Sermon Approval', key: 'sermonApproval', width: 16 },
+      { header: 'Music Approval', key: 'musicApproval', width: 16 },
+    ]
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+
+    for (const svc of services) {
+      const rowData = {
+        date: svc.service_date,
+        day: new Date(svc.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+        season: svc.season || '', special: svc.special_designation || '', spark: svc.spark_title || '',
+        sermonApproval: svc.sermon_approval_status || 'draft', musicApproval: svc.music_approval_status || 'draft',
+      }
+      UPLOAD_TYPES.forEach(t => { rowData[t.key] = statusLabel(svc, t) })
+      const row = ws.addRow(rowData)
+
+      const fill = REPORT_FILL[svc.liturgical_color]
+      const font = REPORT_FONT[svc.liturgical_color]
+      if (fill) row.eachCell(cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${fill}` } } })
+      if (font) row.getCell('season').font = { color: { argb: `FF${font}` }, bold: true }
+      if (svc.special_designation) row.getCell('special').font = { bold: true }
+      UPLOAD_TYPES.forEach(t => {
+        const val = rowData[t.key]
+        if (val === '✓') row.getCell(t.key).font = { color: { argb: 'FF2D7A4F' }, bold: true }
+        else if (val === 'N/A') row.getCell(t.key).font = { color: { argb: 'FF9B9690' } }
+      })
+    }
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `upload-tracker-report-${filter}-${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ── Excel Import ──
   async function handleImportFile(e) {
     const file = e.target.files?.[0]
@@ -366,6 +457,13 @@ export default function UploadTracker() {
           <div style={{ width: '1px', height: '24px', background: 'var(--gray-100)', margin: '0 4px' }} />
           <button className="btn btn-secondary" onClick={downloadTemplate} disabled={services.length === 0}>
             ⬇ Download Template
+          </button>
+          <div style={{ width: '1px', height: '24px', background: 'var(--gray-100)', margin: '0 4px' }} />
+          <button className="btn btn-secondary" onClick={handleExportReportCsv} disabled={services.length === 0}>
+            ⬇ Report CSV
+          </button>
+          <button className="btn btn-secondary" onClick={handleExportReportExcel} disabled={services.length === 0}>
+            📊 Report Excel
           </button>
           <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={importing}>
             {importing ? 'Importing…' : '⬆ Import Spreadsheet'}

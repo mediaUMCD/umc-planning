@@ -1,5 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
+import { SEASONS, getSeasonStyle, getSeasonFromDate } from '../lib/liturgicalCalendar.js'
+import BulkAddCeSessionsModal from '../components/BulkAddCeSessionsModal.jsx'
 
 const CLASS_TYPES = [
   { value: 'adult_sunday_school', label: 'Adult Sunday School', bg: 'var(--burgundy-light)', fg: 'var(--burgundy)' },
@@ -138,6 +142,22 @@ export default function ChristianEducation() {
   const [addPersonError, setAddPersonError] = useState(null)
   const [taggingId, setTaggingId] = useState(null)
 
+  // Special Sunday (shared with Service Planner via the service_dates table)
+  const [specialDay, setSpecialDay] = useState(null) // existing service_dates row, or null
+  const [specialDayLoading, setSpecialDayLoading] = useState(false)
+  const [specialSeason, setSpecialSeason] = useState('')
+  const [specialColor, setSpecialColor] = useState('')
+  const [specialDescription, setSpecialDescription] = useState('')
+  const [savingSpecialDay, setSavingSpecialDay] = useState(false)
+  const [savingSpecialDayOk, setSavingSpecialDayOk] = useState(false)
+  const [specialDayError, setSpecialDayError] = useState(null)
+
+  // Bulk add / export / template
+  const [showBulkAddSessions, setShowBulkAddSessions] = useState(false)
+  const [importingTemplate, setImportingTemplate] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const fileInputRef = useRef(null)
+
   useEffect(() => { loadClasses(); loadTemplates(); loadTeachers() }, [])
 
   async function loadClasses() {
@@ -261,6 +281,71 @@ export default function ChristianEducation() {
     setPushError(null)
     setSavingSessionOk(false)
     setSavingFieldsOk(false)
+    loadSpecialDay(session.session_date)
+  }
+
+  async function loadSpecialDay(dateStr) {
+    setSpecialDayLoading(true)
+    setSpecialDayError(null)
+    setSavingSpecialDayOk(false)
+    const { data } = await supabase
+      .from('service_dates')
+      .select('id, season, liturgical_color, special_designation')
+      .eq('service_date', dateStr)
+      .maybeSingle()
+    if (data) {
+      setSpecialDay(data)
+      setSpecialSeason(data.season || '')
+      setSpecialColor(data.liturgical_color || '')
+      setSpecialDescription(data.special_designation || '')
+    } else {
+      // No service_dates row yet — suggest the auto-computed season so
+      // there's still something useful to look at before she saves anything.
+      const guess = getSeasonFromDate(dateStr)
+      setSpecialDay(null)
+      setSpecialSeason(guess.season || '')
+      setSpecialColor(guess.color || '')
+      setSpecialDescription('')
+    }
+    setSpecialDayLoading(false)
+  }
+
+  async function handleSaveSpecialDay() {
+    if (!selectedSession) return
+    setSavingSpecialDay(true)
+    setSpecialDayError(null)
+    setSavingSpecialDayOk(false)
+    const patch = {
+      season: specialSeason.trim() || null,
+      liturgical_color: specialColor || null,
+      special_designation: specialDescription.trim() || null,
+    }
+    try {
+      if (specialDay?.id) {
+        const { error } = await supabase.from('service_dates').update(patch).eq('id', specialDay.id)
+        if (error) throw error
+        setSpecialDay(prev => ({ ...prev, ...patch }))
+      } else {
+        const { data, error } = await supabase
+          .from('service_dates')
+          .insert([{
+            service_date: selectedSession.session_date,
+            service_type: 'Regular Sunday',
+            service_time: '10:15 a.m.',
+            bulletin_orientation: 'landscape',
+            ...patch,
+          }])
+          .select('id, season, liturgical_color, special_designation')
+          .single()
+        if (error) throw error
+        setSpecialDay(data)
+      }
+      setSavingSpecialDayOk(true)
+      setTimeout(() => setSavingSpecialDayOk(false), 2000)
+    } catch (err) {
+      setSpecialDayError(err.message)
+    }
+    setSavingSpecialDay(false)
   }
 
   const templatesForCategory = (cat) => templates.filter(t => t.category === cat && t.is_active)
@@ -321,6 +406,149 @@ export default function ChristianEducation() {
       setAddSessionError(err.message)
     }
     setAddingSession(false)
+  }
+
+  function normalizeDate(cell) {
+    if (!cell) return ''
+    if (cell instanceof Date) {
+      const y = cell.getUTCFullYear(), m = String(cell.getUTCMonth() + 1).padStart(2, '0'), d = String(cell.getUTCDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    const s = String(cell).trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+    const parsed = new Date(s)
+    if (!isNaN(parsed)) {
+      const y = parsed.getFullYear(), m = String(parsed.getMonth() + 1).padStart(2, '0'), d = String(parsed.getDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    return s
+  }
+
+  function sessionTeacherName(s) {
+    const teacherId = s.field_values?.teacher
+    if (!teacherId) return ''
+    return personLabel(teachers.find(t => t.id === teacherId))
+  }
+
+  function csvEscape(val) {
+    const s = (val ?? '').toString()
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }
+
+  function handleExportSessionsCsv() {
+    const headers = ['Date', 'Category', 'Topic', 'Status', 'Teacher', 'Scripture', 'Curriculum Notes', 'Materials Needed', 'Headcount', 'Pushed to Attendance']
+    const rows = sessions.map(s => [
+      s.session_date, categoryLabel(s.category) || '', s.topic || '', s.status || '',
+      sessionTeacherName(s), s.field_values?.scripture || '',
+      s.curriculum_notes || '', s.materials_needed || '', s.headcount ?? '', s.attendance_pushed ? 'Yes' : '',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ce-sessions-${selectedClass.name.replace(/[^a-z0-9]+/gi, '-')}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleExportSessionsExcel() {
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'UMCD Planning Hub'
+    wb.created = new Date()
+    const ws = wb.addWorksheet('Sessions')
+    ws.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Category', key: 'category', width: 14 },
+      { header: 'Topic', key: 'topic', width: 26 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Teacher', key: 'teacher', width: 20 },
+      { header: 'Scripture', key: 'scripture', width: 20 },
+      { header: 'Curriculum Notes', key: 'notes', width: 32 },
+      { header: 'Materials Needed', key: 'materials', width: 28 },
+      { header: 'Headcount', key: 'headcount', width: 10 },
+      { header: 'Pushed to Attendance', key: 'pushed', width: 16 },
+    ]
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const s of sessions) {
+      ws.addRow({
+        date: s.session_date, category: categoryLabel(s.category) || '', topic: s.topic || '', status: s.status || '',
+        teacher: sessionTeacherName(s), scripture: s.field_values?.scripture || '',
+        notes: s.curriculum_notes || '', materials: s.materials_needed || '',
+        headcount: s.headcount ?? '', pushed: s.attendance_pushed ? 'Yes' : '',
+      })
+    }
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ce-sessions-${selectedClass.name.replace(/[^a-z0-9]+/gi, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Round-trip bulk-edit template — intentionally scoped to the fixed
+  // fields (topic, notes, materials, status, headcount), not the
+  // per-template dynamic fields, to keep re-import unambiguous.
+  function handleDownloadSessionsTemplate() {
+    const rows = sessions.map(s => ({
+      'Date': s.session_date,
+      'Class (reference only)': selectedClass.name,
+      'Category (reference only)': categoryLabel(s.category) || '',
+      'Topic': s.topic || '',
+      'Curriculum Notes': s.curriculum_notes || '',
+      'Materials Needed': s.materials_needed || '',
+      'Status': s.status || 'planned',
+      'Headcount': s.headcount ?? '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = Object.keys(rows[0] || {}).map(k => ({ wch: Math.min(Math.max(k.length, 14), 40) }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sessions')
+    XLSX.writeFile(wb, `ce-sessions-template-${selectedClass.name.replace(/[^a-z0-9]+/gi, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  async function handleImportSessionsTemplate(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingTemplate(true)
+    setImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+      const byDate = {}
+      sessions.forEach(s => { byDate[s.session_date] = s })
+
+      let updated = 0
+      const skipped = []
+      for (const row of rows) {
+        const dateStr = normalizeDate(row['Date'])
+        if (!dateStr) continue
+        const svc = byDate[dateStr]
+        if (!svc) { skipped.push(dateStr); continue }
+        const patch = {
+          topic: row['Topic'] || null,
+          curriculum_notes: row['Curriculum Notes'] || null,
+          materials_needed: row['Materials Needed'] || null,
+          status: row['Status'] || 'planned',
+          headcount: row['Headcount'] === '' ? null : parseInt(row['Headcount']),
+        }
+        const { error } = await supabase.from('ce_sessions').update(patch).eq('id', svc.id)
+        if (!error) updated++
+      }
+      setImportResult({ updated, skipped })
+      selectClass(selectedClass)
+    } catch (err) {
+      setImportResult({ error: err.message })
+    }
+    setImportingTemplate(false)
+    e.target.value = ''
   }
 
   async function handleSaveSession() {
@@ -867,9 +1095,36 @@ export default function ChristianEducation() {
               {selectedClass.leader_name && (
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>Led by {selectedClass.leader_name}</div>
               )}
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowAddSession(s => !s)} style={{ width: '100%' }}>
-                {showAddSession ? '✕ Cancel' : '+ Add Session'}
-              </button>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowAddSession(s => !s)} style={{ flex: 1 }}>
+                  {showAddSession ? '✕ Cancel' : '+ Add Session'}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkAddSessions(true)} style={{ flex: 1 }}>
+                  📅 Bulk Add
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsCsv} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  ⬇ CSV
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsExcel} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  📊 Excel
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleDownloadSessionsTemplate} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  📝 Template
+                </button>
+              </div>
+              <div style={{ marginTop: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={importingTemplate} style={{ width: '100%' }}>
+                  {importingTemplate ? 'Importing…' : '⬆ Upload Filled Template'}
+                </button>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportSessionsTemplate} />
+                {importResult && (
+                  <div style={{ fontSize: '11px', color: importResult.error ? 'var(--danger)' : 'var(--gray-400)', marginTop: '6px' }}>
+                    {importResult.error || `Updated ${importResult.updated} session(s)${importResult.skipped?.length ? `, ${importResult.skipped.length} date(s) not found` : ''}.`}
+                  </div>
+                )}
+              </div>
               {showAddSession && (
                 <form onSubmit={handleAddSession} style={{ marginTop: '10px', background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px' }}>
                   <input type="date" value={newSessionDate} onChange={e => setNewSessionDate(e.target.value)} required
@@ -973,6 +1228,60 @@ export default function ChristianEducation() {
               {sessionError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>{sessionError}</div>}
             </div>
 
+            {/* Special Sunday — shared with Service Planner via service_dates */}
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '6px', color: 'var(--gray-800)' }}>
+                🎉 Special Sunday
+              </h3>
+              <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '12px' }}>
+                Shared with Service Planner — entering it here updates the same record, and vice versa. Use it as a suggestion for the lesson or activity below.
+              </p>
+
+              {specialDayLoading ? <div className="spinner" style={{ margin: '10px auto' }} /> : (
+                <>
+                  {specialDescription && (
+                    <div style={{
+                      background: getSeasonStyle(specialColor).bg, color: getSeasonStyle(specialColor).color,
+                      borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: 600, marginBottom: '12px',
+                    }}>
+                      💡 {specialDescription} — consider a themed activity or lesson!
+                    </div>
+                  )}
+
+                  <div className="grid-2" style={{ marginBottom: '10px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Season</label>
+                      <input type="text" list="ce-season-options" value={specialSeason} onChange={e => setSpecialSeason(e.target.value)} placeholder="e.g. Season after Pentecost" />
+                      <datalist id="ce-season-options">
+                        {SEASONS.map(s => <option key={s.name} value={s.name} />)}
+                      </datalist>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Liturgical Color</label>
+                      <select value={specialColor} onChange={e => setSpecialColor(e.target.value)}>
+                        {['', 'Purple', 'White', 'Green', 'Red', 'Grey'].map(c => <option key={c} value={c}>{c || '(none)'}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Special Description</label>
+                    <textarea value={specialDescription} onChange={e => setSpecialDescription(e.target.value)} rows={2} placeholder="e.g. Grandparents Day" />
+                  </div>
+
+                  {!specialDay && <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginBottom: '10px' }}>No Service Planner entry exists yet for this date — saving here will create one.</div>}
+
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleSaveSpecialDay} disabled={savingSpecialDay}>
+                      {savingSpecialDay ? 'Saving…' : 'Save'}
+                    </button>
+                    {savingSpecialDayOk && <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>✓ Saved</span>}
+                  </div>
+                  {specialDayError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>{specialDayError}</div>}
+                </>
+              )}
+            </div>
+
             {/* Dynamic template fields */}
             {activeTemplate && activeTemplate.fields && activeTemplate.fields.length > 0 && (
               <div className="card" style={{ marginBottom: '16px' }}>
@@ -1028,6 +1337,16 @@ export default function ChristianEducation() {
         )}
       </div>
       </>
+      )}
+
+      {showBulkAddSessions && selectedClass && (
+        <BulkAddCeSessionsModal
+          cls={selectedClass}
+          existingDates={sessions.map(s => s.session_date)}
+          templates={templates}
+          onClose={() => setShowBulkAddSessions(false)}
+          onSaved={() => selectClass(selectedClass)}
+        />
       )}
     </div>
   )
