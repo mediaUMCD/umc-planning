@@ -327,6 +327,20 @@ const DEFAULT_ORDER_TYPES = [
 let rowIdCounter = 0
 function newRowId() { rowIdCounter += 1; return `row_${Date.now()}_${rowIdCounter}` }
 
+// Self-heals services saved before the scripture/row-sync fix: if a service
+// has more scriptures with a reference filled in than it has 'scripture'
+// rows in its saved order, pad in the missing rows so nothing that's
+// already in the data silently disappears from the preview/bulletin.
+function reconcileScriptureRows(rows, scriptureCount) {
+  const existing = rows.filter(r => r.type === 'scripture').length
+  const missing = scriptureCount - existing
+  if (missing <= 0) return rows
+  const lastScriptureIdx = rows.map(r => r.type).lastIndexOf('scripture')
+  const insertAt = lastScriptureIdx === -1 ? rows.length : lastScriptureIdx + 1
+  const newRows = Array.from({ length: missing }, () => ({ id: newRowId(), type: 'scripture', contentOverride: null, customLabel: '', customContent: '', customPage: '' }))
+  return [...rows.slice(0, insertAt), ...newRows, ...rows.slice(insertAt)]
+}
+
 // Starter row orders for services whose flow genuinely differs from a Regular
 // Sunday. Anything not listed here falls back to DEFAULT_ORDER_TYPES. She can
 // still freely add/remove/reorder rows afterward — this is just the starting point.
@@ -492,8 +506,32 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       return arr.map((h, i) => ({ ...h, sort_order: i + 1 }))
     })
   }
-  function addScripture() { setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: prev.length + 1, page_reference: '', is_gospel: false, reader: '' }]) }
-  function removeScripture(idx) { setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 }))) }
+  function addScripture() {
+    setServiceScriptures(prev => [...prev, { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: prev.length + 1, page_reference: '', is_gospel: false, reader: '' }])
+    // The order builder's row list is what actually drives the preview and
+    // the generated bulletin — it doesn't auto-track the scripture count,
+    // so without this a 2nd/3rd scripture gets silently dropped from both
+    // because there's no row for it to fill. Add one more 'scripture' row,
+    // right after the last existing one, so it always keeps pace.
+    setForm(f => {
+      const rows = f.bulletin_order || []
+      const lastScriptureIdx = rows.map(r => r.type).lastIndexOf('scripture')
+      const newRow = { id: newRowId(), type: 'scripture', contentOverride: null, customLabel: '', customContent: '', customPage: '' }
+      const insertAt = lastScriptureIdx === -1 ? rows.length : lastScriptureIdx + 1
+      return { ...f, bulletin_order: [...rows.slice(0, insertAt), newRow, ...rows.slice(insertAt)] }
+    })
+  }
+  function removeScripture(idx) {
+    setServiceScriptures(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i + 1 })))
+    // Mirror the removal in the order builder so a leftover empty scripture
+    // row doesn't sit there silently once the scripture behind it is gone.
+    setForm(f => {
+      const rows = f.bulletin_order || []
+      const lastScriptureIdx = rows.map(r => r.type).lastIndexOf('scripture')
+      if (lastScriptureIdx === -1) return f
+      return { ...f, bulletin_order: rows.filter((_, i) => i !== lastScriptureIdx) }
+    })
+  }
   function moveScripture(idx, dir) {
     setServiceScriptures(prev => {
       const swapWith = idx + dir
@@ -606,7 +644,10 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       special_designation: svc.special_designation || '',
       service_time: svc.service_time || '10:15 a.m.',
       back_cover_photo_url: svc.back_cover_photo_url || '',
-      bulletin_order: (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false, Math.max(1, svc.service_scriptures?.filter(s => s.reference).length || 1)),
+      bulletin_order: reconcileScriptureRows(
+        (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false, Math.max(1, svc.service_scriptures?.filter(s => s.reference).length || 1)),
+        svc.service_scriptures?.filter(s => s.reference).length || 0
+      ),
     })
     setServiceHymns(
       svc.service_hymns?.length
