@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
 import BulkAddSundaysModal from '../components/BulkAddSundaysModal.jsx'
+import BulletinTemplateEditor from '../components/BulletinTemplateEditor.jsx'
 import { getSundayNumber } from '../lib/sundayNumber.js'
 import { SEASONS, getSeasonColor, getSeasonStyle, getSeasonFromDate } from '../lib/liturgicalCalendar.js'
 
@@ -319,8 +320,8 @@ const ROW_TYPES = [
 const ROW_TYPE_LABELS = Object.fromEntries(ROW_TYPES.map(t => [t.key, t.label]))
 
 const DEFAULT_ORDER_TYPES = [
-  'welcome', 'call_to_worship', 'hymn', 'scripture', 'childrens_message',
-  'special_music', 'sermon', 'apostles_creed', 'pastoral_prayer', 'lords_prayer',
+  'welcome', 'call_to_worship', 'hymn', 'childrens_message',
+  'special_music', 'scripture', 'sermon', 'apostles_creed', 'pastoral_prayer', 'lords_prayer',
   'offertory_prayer', 'doxology', 'announcements', 'closing_hymn', 'benediction',
 ]
 
@@ -355,14 +356,18 @@ const SPECIAL_ORDER_TEMPLATES = {
 // checked and the template doesn't already include communion rows — splices
 // in Great Thanksgiving / Breaking the Bread right after the sermon (or the
 // creed, or at the end if neither exists).
-function buildOrderForContext(serviceType, isCommunion, scriptureCount = 1) {
-  let types = [...(SPECIAL_ORDER_TEMPLATES[serviceType] || DEFAULT_ORDER_TYPES)]
-  // Repeat the 'scripture' slot once per reading entered above (minimum 1),
-  // so a second/third scripture gets its own row instead of only showing the first.
-  const scriptureIdx = types.indexOf('scripture')
-  if (scriptureIdx !== -1) {
-    const extra = Math.max(1, scriptureCount) - 1
-    if (extra > 0) types.splice(scriptureIdx + 1, 0, ...Array(extra).fill('scripture'))
+function buildOrderForContext(serviceType, isCommunion, scriptureCount = 2, templatesMap = {}) {
+  let types = [...(templatesMap[serviceType] || SPECIAL_ORDER_TEMPLATES[serviceType] || DEFAULT_ORDER_TYPES)]
+  // The template defines the baseline scripture count/position. Only top it
+  // up if more scriptures were actually entered than the template accounts
+  // for — never assume the template has just one slot, since templates can
+  // (and by default now do) already include more than one.
+  const existingScriptureRows = types.filter(t => t === 'scripture').length
+  const needed = Math.max(scriptureCount, Math.max(existingScriptureRows, 1)) - existingScriptureRows
+  if (needed > 0) {
+    const scriptureIdx = types.lastIndexOf('scripture')
+    const insertAt = scriptureIdx === -1 ? types.length : scriptureIdx + 1
+    types.splice(insertAt, 0, ...Array(needed).fill('scripture'))
   }
   if (isCommunion && !types.includes('great_thanksgiving')) {
     const insertAt = types.includes('sermon') ? types.lastIndexOf('sermon') + 1
@@ -392,6 +397,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [searchDate, setSearchDate] = useState('')
   const [editingService, setEditingService] = useState(null)
   const [showBulkAdd, setShowBulkAdd] = useState(false)
+  const [bulletinTemplates, setBulletinTemplates] = useState({})
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false)
   const [hymns, setHymns] = useState([])
   const [saveStatus, setSaveStatus] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -400,13 +407,26 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
-  const [serviceScriptures, setServiceScriptures] = useState([{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
+  const [serviceScriptures, setServiceScriptures] = useState([
+    { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' },
+    { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
+  ])
+
+  async function loadBulletinTemplates() {
+    const { data } = await supabase.from('bulletin_templates').select('service_type, row_types')
+    const map = {}
+    for (const t of (data || [])) map[t.service_type] = t.row_types
+    setBulletinTemplates(map)
+    return map
+  }
 
   useEffect(() => { 
     const init = async () => {
       const { data: hymnData } = await supabase.from('hymns').select('hymnal, number, title')
       const sorted = (hymnData || []).sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
       setHymns(sorted)
+
+      const tplMap = await loadBulletinTemplates()
 
       const { data: svcData } = await supabase.from('service_dates').select('*, service_hymns(*), service_scriptures(*)').order('service_date', { ascending: true })
       setServices(svcData || [])
@@ -416,7 +436,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       if (editServiceId && svcData) {
         const svc = svcData.find(s => s.id === editServiceId)
         if (svc) {
-          startEdit(svc, sorted)
+          startEdit(svc, sorted, tplMap)
           if (onClearEditId) onClearEditId()
         }
       }
@@ -577,7 +597,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     const label = `${form.service_type}${form.is_communion ? ' + Communion' : ''}`
     if (!confirm(`Replace the current Bulletin Order rows with the default template for "${label}"? Your current rows below will be replaced — this can't be undone unless you re-add them manually.`)) return
     const scriptureCount = Math.max(1, serviceScriptures.filter(s => s.reference).length)
-    setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion, scriptureCount) }))
+    setForm(f => ({ ...f, bulletin_order: buildOrderForContext(f.service_type, f.is_communion, scriptureCount, bulletinTemplates) }))
   }
 
   function updateScriptureReaderByOccurrence(occurrence, value) {
@@ -602,13 +622,16 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   }
 
   function startNew() {
-    setForm({ ...EMPTY_FORM, bulletin_order: buildOrderForContext(EMPTY_FORM.service_type, EMPTY_FORM.is_communion) })
+    setForm({ ...EMPTY_FORM, bulletin_order: buildOrderForContext(EMPTY_FORM.service_type, EMPTY_FORM.is_communion, 2, bulletinTemplates) })
     setServiceHymns([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
-    setServiceScriptures([{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }])
+    setServiceScriptures([
+      { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' },
+      { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
+    ])
     setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
   }
 
-  function startEdit(svc, hymnsList = hymns) {
+  function startEdit(svc, hymnsList = hymns, templatesOverride = bulletinTemplates) {
     const auto = (!svc.season && !svc.liturgical_color) ? getSeasonFromDate(svc.service_date) : {}
     setForm({
       service_date: svc.service_date,
@@ -645,7 +668,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       service_time: svc.service_time || '10:15 a.m.',
       back_cover_photo_url: svc.back_cover_photo_url || '',
       bulletin_order: reconcileScriptureRows(
-        (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false, Math.max(1, svc.service_scriptures?.filter(s => s.reference).length || 1)),
+        (Array.isArray(svc.bulletin_order) && svc.bulletin_order.length > 0) ? svc.bulletin_order : buildOrderForContext(svc.service_type || 'Regular Sunday', svc.is_communion || false, Math.max(1, svc.service_scriptures?.filter(s => s.reference).length || 1), templatesOverride),
         svc.service_scriptures?.filter(s => s.reference).length || 0
       ),
     })
@@ -1318,6 +1341,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
         <h1 className="page-title">Service Planner</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-secondary" onClick={() => setShowBulkAdd(true)}>📅 Bulk Add Sundays</button>
+          <button className="btn btn-secondary" onClick={() => setShowTemplateEditor(true)}>🗂️ Bulletin Templates</button>
           <button className="btn btn-primary" onClick={startNew}>+ New Service</button>
         </div>
       </div>
@@ -1396,6 +1420,14 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           getSeasonFromDate={getSeasonFromDate}
           onClose={() => setShowBulkAdd(false)}
           onSaved={loadServices}
+        />
+      )}
+
+      {showTemplateEditor && (
+        <BulletinTemplateEditor
+          builtInDefaults={Object.fromEntries(SERVICE_TYPES.map(t => [t, SPECIAL_ORDER_TEMPLATES[t] || DEFAULT_ORDER_TYPES]))}
+          onClose={() => setShowTemplateEditor(false)}
+          onSaved={loadBulletinTemplates}
         />
       )}
     </div>
