@@ -142,9 +142,10 @@ function totalStock(p) {
 }
 
 export default function Fundraising() {
-  const [tab, setTab] = useState('inventory') // 'inventory' | 'ledger'
+  const [tab, setTab] = useState('inventory') // 'inventory' | 'ledger' | 'requests'
   const [products, setProducts] = useState([])
   const [transactions, setTransactions] = useState([])
+  const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -188,7 +189,22 @@ export default function Fundraising() {
     const { data: txs, error: tErr } = await supabase.from('fundraising_transactions').select('*').order('transaction_date', { ascending: false }).order('created_at', { ascending: false })
     if (tErr) { setError(tErr.message); setLoading(false); return }
     setTransactions(txs || [])
+
+    const { data: reqs, error: rErr } = await supabase.from('fundraising_order_requests').select('*').order('created_at', { ascending: false })
+    if (!rErr) setRequests(reqs || [])
+
     setLoading(false)
+  }
+
+  async function updateRequestStatus(id, status) {
+    setRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r))
+    await supabase.from('fundraising_order_requests').update({ status }).eq('id', id)
+  }
+
+  async function handleDeleteRequest(id) {
+    if (!confirm('Delete this order request?')) return
+    await supabase.from('fundraising_order_requests').delete().eq('id', id)
+    setRequests(prev => prev.filter(r => r.id !== id))
   }
 
   const summary = useMemo(() => {
@@ -233,6 +249,10 @@ export default function Fundraising() {
               className={tab === 'ledger' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               onClick={() => setTab('ledger')}
             >Money In / Out</button>
+            <button
+              className={tab === 'requests' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+              onClick={() => setTab('requests')}
+            >Order Requests{requests.filter(r => r.status === 'new').length > 0 ? ` (${requests.filter(r => r.status === 'new').length})` : ''}</button>
           </div>
         </div>
         {tab === 'inventory' ? (
@@ -242,9 +262,9 @@ export default function Fundraising() {
             </button>
             <button className="btn btn-primary" onClick={openAddProduct}>+ Add Product</button>
           </div>
-        ) : (
+        ) : tab === 'ledger' ? (
           <button className="btn btn-primary" onClick={() => setShowTxForm(true)}>+ Log Transaction</button>
-        )}
+        ) : null}
       </div>
 
       {exportError && (
@@ -264,8 +284,10 @@ export default function Fundraising() {
 
         {loading ? <div className="spinner" /> : tab === 'inventory' ? (
           <InventoryGrid products={products} onEdit={openEditProduct} onDelete={handleDeleteProduct} />
-        ) : (
+        ) : tab === 'ledger' ? (
           <LedgerTable transactions={transactions} products={products} onDelete={handleDeleteTx} />
+        ) : (
+          <RequestsTable requests={requests} onStatusChange={updateRequestStatus} onDelete={handleDeleteRequest} />
         )}
       </div>
 
@@ -334,6 +356,7 @@ function InventoryGrid({ products, onEdit, onDelete }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--gray-800)' }}>{p.name}</div>
                 {p.is_public && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--burgundy)', background: 'var(--burgundy-light)', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>PUBLIC</span>}
+                {p.is_christian_ed_item && <span style={{ fontSize: '10px', fontWeight: 700, color: '#1565c0', background: '#e3f2fd', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>CE</span>}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '2px' }}>{FUND_LABEL[p.fund_source] || p.fund_source}</div>
 
@@ -384,6 +407,7 @@ function ProductFormModal({ product, onClose, onSaved }) {
   const [vendor, setVendor] = useState(product?.vendor || '')
   const [quantity, setQuantity] = useState(product?.quantity_on_hand ?? 0)
   const [isPublic, setIsPublic] = useState(product?.is_public || false)
+  const [isChristianEd, setIsChristianEd] = useState(product?.is_christian_ed_item || false)
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(product?.image_url || null)
   const [saving, setSaving] = useState(false)
@@ -435,6 +459,7 @@ function ProductFormModal({ product, onClose, onSaved }) {
         vendor: vendor || null,
         quantity_on_hand: hasVariants ? variantTotal : (Number(quantity) || 0),
         is_public: isPublic,
+        is_christian_ed_item: isPublic ? isChristianEd : false,
         image_url: imageUrl,
       }
 
@@ -582,6 +607,13 @@ function ProductFormModal({ product, onClose, onSaved }) {
           Show on the public website fundraising page
         </label>
 
+        {isPublic && (
+          <label className="checkbox-label" style={{ marginBottom: '10px', marginLeft: '24px' }}>
+            <input type="checkbox" checked={isChristianEd} onChange={e => setIsChristianEd(e.target.checked)} />
+            This is a Christian Ed item (shows on the Christian Education page's listing)
+          </label>
+        )}
+
         {error && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{error}</div>}
 
         <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={saving}>
@@ -593,6 +625,65 @@ function ProductFormModal({ product, onClose, onSaved }) {
 }
 
 // ── Ledger ─────────────────────────────────────────────────────────────
+const REQUEST_STATUS_LABELS = { new: 'New', contacted: 'Contacted', fulfilled: 'Fulfilled', cancelled: 'Cancelled' }
+const REQUEST_STATUS_COLORS = {
+  new: { bg: '#fdecea', fg: '#c0392b' },
+  contacted: { bg: '#fff8e7', fg: '#b8860b' },
+  fulfilled: { bg: '#e6f4ea', fg: '#2d7a4f' },
+  cancelled: { bg: '#eee', fg: '#888' },
+}
+
+function RequestsTable({ requests, onStatusChange, onDelete }) {
+  if (requests.length === 0) {
+    return <div className="empty-state"><div className="icon">📬</div><p>No order requests yet — these come in from the Christian Ed page on the website.</p></div>
+  }
+  return (
+    <div className="card">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Requested</th>
+            <th>Item</th>
+            <th>Qty</th>
+            <th>Requester</th>
+            <th>Contact</th>
+            <th>Notes</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map(r => {
+            const c = REQUEST_STATUS_COLORS[r.status] || REQUEST_STATUS_COLORS.new
+            return (
+              <tr key={r.id}>
+                <td>{new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                <td>{r.product_name}{r.variant_label ? ` — ${r.variant_label}` : ''}</td>
+                <td>{r.quantity}</td>
+                <td>{r.requester_name}</td>
+                <td>{r.requester_contact}</td>
+                <td style={{ maxWidth: '200px', fontSize: '12px', color: 'var(--gray-600)' }}>{r.notes || '—'}</td>
+                <td>
+                  <select
+                    value={r.status}
+                    onChange={e => onStatusChange(r.id, e.target.value)}
+                    style={{ background: c.bg, color: c.fg, border: 'none', borderRadius: '6px', padding: '4px 8px', fontSize: '12px', fontWeight: 600 }}
+                  >
+                    {Object.entries(REQUEST_STATUS_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <button onClick={() => onDelete(r.id)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '12px' }}>Delete</button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function LedgerTable({ transactions, products, onDelete }) {
   const productName = (id) => products.find(p => p.id === id)?.name || '—'
   const variantLabel = (productId, variantId) => {
