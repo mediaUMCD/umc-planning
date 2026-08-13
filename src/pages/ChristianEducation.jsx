@@ -57,6 +57,8 @@ function personLabel(p) {
 
 const CE_TAG_NAME = 'Christian Ed'
 
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
 const STATUS_OPTIONS = [
   { value: 'planned', label: 'Planned' },
   { value: 'confirmed', label: 'Confirmed' },
@@ -88,6 +90,7 @@ export default function ChristianEducation() {
   const [newMeetingTime, setNewMeetingTime] = useState('')
   const [newLocation, setNewLocation] = useState('')
   const [newLeader, setNewLeader] = useState('')
+  const [newDefaultTemplateId, setNewDefaultTemplateId] = useState('')
   const [addingClass, setAddingClass] = useState(false)
   const [addClassError, setAddClassError] = useState(null)
 
@@ -527,13 +530,14 @@ export default function ChristianEducation() {
           meeting_time: newMeetingTime || null,
           location: newLocation || null,
           leader_name: newLeader || null,
+          default_template_id: newDefaultTemplateId || null,
         }])
         .select()
         .single()
       if (error) throw error
       setClasses(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       setNewClassType('adult_sunday_school'); setNewClassName(''); setNewMeetingDay('')
-      setNewMeetingTime(''); setNewLocation(''); setNewLeader('')
+      setNewMeetingTime(''); setNewLocation(''); setNewLeader(''); setNewDefaultTemplateId('')
       setShowAddClass(false)
     } catch (err) {
       setAddClassError(err.message)
@@ -1364,15 +1368,32 @@ export default function ChristianEducation() {
               <input type="text" value={newClassName} onChange={e => setNewClassName(e.target.value)} placeholder="Class name" required
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
               <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                <input type="text" value={newMeetingDay} onChange={e => setNewMeetingDay(e.target.value)} placeholder="Meeting day"
-                  style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }} />
-                <input type="text" value={newMeetingTime} onChange={e => setNewMeetingTime(e.target.value)} placeholder="Time"
+                <select value={newMeetingDay} onChange={e => setNewMeetingDay(e.target.value)}
+                  style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }}>
+                  <option value="">Meeting day</option>
+                  {WEEKDAYS.map(w => <option key={w} value={w}>{w}</option>)}
+                </select>
+                <input type="time" value={newMeetingTime} onChange={e => setNewMeetingTime(e.target.value)} placeholder="Time"
                   style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }} />
               </div>
               <input type="text" value={newLocation} onChange={e => setNewLocation(e.target.value)} placeholder="Location"
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
               <input type="text" value={newLeader} onChange={e => setNewLeader(e.target.value)} placeholder="Leader / teacher name"
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
+              <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Default Session Template (optional)</label>
+              <select value={newDefaultTemplateId} onChange={e => setNewDefaultTemplateId(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
+                <option value="">No default (choose per session)</option>
+                {CATEGORIES.map(cat => {
+                  const opts = templatesForCategory(cat.value)
+                  if (opts.length === 0) return null
+                  return (
+                    <optgroup key={cat.value} label={cat.label}>
+                      {opts.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </optgroup>
+                  )
+                })}
+              </select>
               {addClassError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addClassError}</div>}
               <button type="submit" className="btn btn-primary btn-sm" disabled={addingClass} style={{ width: '100%' }}>
                 {addingClass ? 'Adding…' : 'Add Class'}
@@ -1443,7 +1464,16 @@ export default function ChristianEducation() {
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>Led by {selectedClass.leader_name}</div>
               )}
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setShowAddSession(s => !s)} style={{ flex: 1 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => {
+                  setShowAddSession(s => {
+                    const opening = !s
+                    if (opening && selectedClass?.default_template_id) {
+                      const dt = templates.find(t => t.id === selectedClass.default_template_id)
+                      if (dt) { setNewCategory(dt.category); setNewTemplateId(dt.id) }
+                    }
+                    return opening
+                  })
+                }} style={{ flex: 1 }}>
                   {showAddSession ? '✕ Cancel' : '+ Add Session'}
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkAddSessions(true)} style={{ flex: 1 }}>
