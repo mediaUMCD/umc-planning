@@ -134,6 +134,9 @@ export default function ChristianEducation() {
   const [teacherSearch, setTeacherSearch] = useState('')
   const [teacherSearchResults, setTeacherSearchResults] = useState([])
   const [teacherSearchLoading, setTeacherSearchLoading] = useState(false)
+  const [importingTeachers, setImportingTeachers] = useState(false)
+  const [teacherImportResult, setTeacherImportResult] = useState(null)
+  const teacherFileInputRef = useRef(null)
   const [newPersonFirst, setNewPersonFirst] = useState('')
   const [newPersonLast, setNewPersonLast] = useState('')
   const [newPersonPhone, setNewPersonPhone] = useState('')
@@ -338,6 +341,79 @@ export default function ChristianEducation() {
       setAddPersonError(err.message)
     }
     setAddingPerson(false)
+  }
+
+  function handleDownloadTeachersTemplate() {
+    const rows = teachers.map(t => ({
+      'First Name': t.first_name || '',
+      'Last Name': t.last_name || '',
+      'Phone': t.phone || '',
+      'Email': t.email || '',
+    }))
+    // Always include a few blank rows so it's obvious where to add new people
+    for (let i = 0; i < 5; i++) rows.push({ 'First Name': '', 'Last Name': '', 'Phone': '', 'Email': '' })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 26 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Teachers')
+    XLSX.writeFile(wb, `ce-teachers-template-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  async function handleImportTeachersTemplate(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingTeachers(true)
+    setTeacherImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+      let tagId = ceTagId
+      if (!tagId) {
+        const { data: existing } = await supabase.from('tags').select('id').eq('name', CE_TAG_NAME).maybeSingle()
+        tagId = existing?.id
+        if (tagId) setCeTagId(tagId)
+      }
+
+      let added = 0, updated = 0
+      const skipped = []
+      for (const row of rows) {
+        const first = (row['First Name'] || '').toString().trim()
+        const last = (row['Last Name'] || '').toString().trim()
+        if (!first && !last) continue // blank template row
+        if (!first || !last) { skipped.push(`${first}${last} (needs both first and last name)`); continue }
+
+        const phone = (row['Phone'] || '').toString().trim() || null
+        const email = (row['Email'] || '').toString().trim() || null
+
+        const existingMatch = teachers.find(t =>
+          (t.first_name || '').toLowerCase() === first.toLowerCase() &&
+          (t.last_name || '').toLowerCase() === last.toLowerCase()
+        )
+
+        if (existingMatch) {
+          const { error } = await supabase.from('people').update({ phone, email }).eq('id', existingMatch.id)
+          if (!error) updated++
+        } else {
+          const { data: person, error } = await supabase
+            .from('people')
+            .insert([{ first_name: first, last_name: last, phone, email, person_type: 'staff' }])
+            .select()
+            .single()
+          if (error) { skipped.push(`${first} ${last} (${error.message})`); continue }
+          if (tagId) await supabase.from('person_tags').insert([{ person_id: person.id, tag_id: tagId }])
+          added++
+        }
+      }
+      setTeacherImportResult({ added, updated, skipped })
+      await loadTeachers()
+    } catch (err) {
+      setTeacherImportResult({ error: err.message })
+    }
+    setImportingTeachers(false)
+    e.target.value = ''
   }
 
   async function selectClass(cls) {
@@ -580,17 +656,30 @@ export default function ChristianEducation() {
   // Round-trip bulk-edit template — intentionally scoped to the fixed
   // fields (topic, notes, materials, status, headcount), not the
   // per-template dynamic fields, to keep re-import unambiguous.
-  function handleDownloadSessionsTemplate() {
-    const rows = sessions.map(s => ({
-      'Date': s.session_date,
-      'Class (reference only)': selectedClass.name,
-      'Category (reference only)': categoryLabel(s.category) || '',
-      'Topic': s.topic || '',
-      'Curriculum Notes': s.curriculum_notes || '',
-      'Materials Needed': s.materials_needed || '',
-      'Status': s.status || 'planned',
-      'Headcount': s.headcount ?? '',
-    }))
+  async function handleDownloadSessionsTemplate() {
+    const dates = sessions.map(s => s.session_date)
+    const { data: specialDays } = dates.length > 0
+      ? await supabase.from('service_dates').select('service_date, season, liturgical_color, special_designation').in('service_date', dates)
+      : { data: [] }
+    const specialByDate = {}
+    for (const sd of (specialDays || [])) specialByDate[sd.service_date] = sd
+
+    const rows = sessions.map(s => {
+      const special = specialByDate[s.session_date]
+      return {
+        'Date': s.session_date,
+        'Class (reference only)': selectedClass.name,
+        'Category (reference only)': categoryLabel(s.category) || '',
+        'Topic': s.topic || '',
+        'Curriculum Notes': s.curriculum_notes || '',
+        'Materials Needed': s.materials_needed || '',
+        'Status': s.status || 'planned',
+        'Headcount': s.headcount ?? '',
+        'Season': special?.season || '',
+        'Liturgical Color': special?.liturgical_color || '',
+        'Special Description (e.g. Mother\'s Day)': special?.special_designation || '',
+      }
+    })
     const ws = XLSX.utils.json_to_sheet(rows)
     ws['!cols'] = Object.keys(rows[0] || {}).map(k => ({ wch: Math.min(Math.max(k.length, 14), 40) }))
     const wb = XLSX.utils.book_new()
@@ -611,6 +700,7 @@ export default function ChristianEducation() {
       const byDate = {}
       sessions.forEach(s => { byDate[s.session_date] = s })
 
+      const specialCol = 'Special Description (e.g. Mother\'s Day)'
       let updated = 0
       const skipped = []
       for (const row of rows) {
@@ -627,6 +717,29 @@ export default function ChristianEducation() {
         }
         const { error } = await supabase.from('ce_sessions').update(patch).eq('id', svc.id)
         if (!error) updated++
+
+        // Special Sunday info is shared with Service Planner via service_dates —
+        // only touch it if the row actually has something in those columns, so
+        // leaving them blank in the spreadsheet never erases existing data.
+        const season = (row['Season'] || '').toString().trim()
+        const color = (row['Liturgical Color'] || '').toString().trim()
+        const special = (row[specialCol] || '').toString().trim()
+        if (season || color || special) {
+          const { data: existing } = await supabase.from('service_dates').select('id').eq('service_date', dateStr).maybeSingle()
+          const specialPatch = {
+            ...(season && { season }),
+            ...(color && { liturgical_color: color }),
+            ...(special && { special_designation: special }),
+          }
+          if (existing) {
+            await supabase.from('service_dates').update(specialPatch).eq('id', existing.id)
+          } else {
+            await supabase.from('service_dates').insert([{
+              service_date: dateStr, service_type: 'Regular Sunday', service_time: '10:15 a.m.',
+              bulletin_orientation: 'landscape', ...specialPatch,
+            }])
+          }
+        }
       }
       setImportResult({ updated, skipped })
       selectClass(selectedClass)
@@ -977,6 +1090,30 @@ export default function ChristianEducation() {
               </div>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
+          </div>
+
+          <div className="card" style={{ marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '10px', color: 'var(--gray-800)' }}>Bulk Add / Edit</h3>
+            <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>
+              Download the current list, add or edit rows in Excel, then upload it back. Rows matching an existing name (first + last) update that person; new names get added and tagged "{CE_TAG_NAME}" automatically.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary btn-sm" onClick={handleDownloadTeachersTemplate}>📝 Download Template</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => teacherFileInputRef.current?.click()} disabled={importingTeachers}>
+                {importingTeachers ? 'Importing…' : '⬆ Upload Filled Template'}
+              </button>
+              <input ref={teacherFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportTeachersTemplate} />
+            </div>
+            {teacherImportResult && (
+              <div style={{ fontSize: '12px', marginTop: '10px', color: teacherImportResult.error ? 'var(--danger)' : 'var(--gray-600)' }}>
+                {teacherImportResult.error ? teacherImportResult.error : (
+                  <>
+                    Added {teacherImportResult.added}, updated {teacherImportResult.updated}.
+                    {teacherImportResult.skipped?.length > 0 && ` Skipped: ${teacherImportResult.skipped.join('; ')}`}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Currently tagged */}
