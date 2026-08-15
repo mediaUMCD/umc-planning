@@ -97,6 +97,17 @@ export default function ChristianEducation() {
   const [classImportResult, setClassImportResult] = useState(null)
   const classFileInputRef = useRef(null)
 
+  // Reports (One Board)
+  const today = new Date()
+  const [reportStart, setReportStart] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10))
+  const [reportEnd, setReportEnd] = useState(new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10))
+  const [reportClassFilter, setReportClassFilter] = useState('all')
+  const [reportRecap, setReportRecap] = useState('')
+  const [reportRows, setReportRows] = useState([])
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState(null)
+  const [reportRun, setReportRun] = useState(false)
+
   // Add Session form
   const [showAddSession, setShowAddSession] = useState(false)
   const [newSessionDate, setNewSessionDate] = useState('')
@@ -436,6 +447,78 @@ export default function ChristianEducation() {
     }
     setImportingClasses(false)
     e.target.value = ''
+  }
+
+  async function handleRunReport() {
+    setReportLoading(true)
+    setReportError(null)
+    setReportRun(true)
+    try {
+      let query = supabase
+        .from('ce_sessions')
+        .select('id, session_date, topic, status, class_id')
+        .gte('session_date', reportStart)
+        .lte('session_date', reportEnd)
+        .order('session_date', { ascending: true })
+      if (reportClassFilter !== 'all') query = query.eq('class_id', reportClassFilter)
+      const { data: sessionRows, error } = await query
+      if (error) throw error
+
+      const dates = [...new Set((sessionRows || []).map(s => s.session_date))]
+      let specialByDate = {}
+      if (dates.length) {
+        const { data: sd } = await supabase
+          .from('service_dates')
+          .select('service_date, special_designation')
+          .in('service_date', dates)
+        specialByDate = Object.fromEntries((sd || []).map(d => [d.service_date, d.special_designation]))
+      }
+
+      const rows = (sessionRows || []).map(s => {
+        const cls = classes.find(c => c.id === s.class_id)
+        return {
+          date: s.session_date,
+          className: cls?.name || '(unknown class)',
+          classType: typeMeta(cls?.class_type).label,
+          teacher: cls?.leader_name || '',
+          specialDay: specialByDate[s.session_date] || '',
+          title: s.topic || '',
+          status: s.status || '',
+        }
+      })
+      setReportRows(rows)
+    } catch (err) {
+      setReportError(err.message)
+      setReportRows([])
+    }
+    setReportLoading(false)
+  }
+
+  function handleExportReport() {
+    const rows = reportRows.map(r => ({
+      'Date': r.date,
+      'Class': r.className,
+      'Class Type': r.classType,
+      'Special Sunday': r.specialDay,
+      'Teacher': r.teacher,
+      'Title / Plan': r.title,
+      'Status': r.status,
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 32 }, { wch: 12 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'CE Class Plan')
+
+    if (reportRecap.trim()) {
+      const recapWs = XLSX.utils.aoa_to_sheet([
+        ['Previous Period Recap'],
+        [reportRecap.trim()],
+      ])
+      recapWs['!cols'] = [{ wch: 100 }]
+      XLSX.utils.book_append_sheet(wb, recapWs, 'Recap')
+    }
+
+    XLSX.writeFile(wb, `ce-class-plan-${reportStart}-to-${reportEnd}.xlsx`)
   }
 
   function handleDownloadTeachersTemplate() {
@@ -1425,6 +1508,98 @@ export default function ChristianEducation() {
           })}
         </div>
       </div>
+      ) : view === 'reports' ? (
+
+      /* ============ REPORTS VIEW (One Board) ============ */
+      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
+        <div style={{ padding: '24px', maxWidth: '920px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)' }}>Reports — One Board</h1>
+              <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
+                Pull the CE class plan for a date range and export it for the board report.
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
+          </div>
+
+          <div className="card" style={{ marginBottom: '20px' }}>
+            <div className="grid-2" style={{ marginBottom: '10px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Start Date</label>
+                <input type="date" value={reportStart} onChange={e => setReportStart(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>End Date</label>
+                <input type="date" value={reportEnd} onChange={e => setReportEnd(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
+              </div>
+            </div>
+            <div style={{ marginBottom: '10px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Class</label>
+              <select value={reportClassFilter} onChange={e => setReportClassFilter(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}>
+                <option value="all">All classes</option>
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: '10px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>
+                Previous Period Recap (optional — pasted in, included on its own tab in the export)
+              </label>
+              <textarea value={reportRecap} onChange={e => setReportRecap(e.target.value)} rows={4}
+                placeholder="Paste a summary of the prior period here if you have one…"
+                style={{ width: '100%', padding: '8px', fontSize: '13px', fontFamily: 'inherit' }} />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={handleRunReport} disabled={reportLoading}>
+              {reportLoading ? 'Loading…' : 'Generate Report'}
+            </button>
+            {reportError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>{reportError}</div>}
+          </div>
+
+          {reportRun && !reportLoading && (
+            reportRows.length === 0 ? (
+              <div className="empty-state"><div className="icon">📊</div><p>No sessions found in that range.</p></div>
+            ) : (
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>{reportRows.length} session{reportRows.length === 1 ? '' : 's'}</div>
+                  <button className="btn btn-secondary btn-sm" onClick={handleExportReport}>⬇ Export to Excel</button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--gray-100)', textAlign: 'left' }}>
+                        <th style={{ padding: '6px' }}>Date</th>
+                        <th style={{ padding: '6px' }}>Class</th>
+                        <th style={{ padding: '6px' }}>Type</th>
+                        <th style={{ padding: '6px' }}>Special Sunday</th>
+                        <th style={{ padding: '6px' }}>Teacher</th>
+                        <th style={{ padding: '6px' }}>Title / Plan</th>
+                        <th style={{ padding: '6px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportRows.map(r => (
+                        <tr key={r.date + r.className} style={{ borderBottom: '1px solid var(--gray-100)' }}>
+                          <td style={{ padding: '6px' }}>{new Date(r.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                          <td style={{ padding: '6px' }}>{r.className}</td>
+                          <td style={{ padding: '6px' }}>{r.classType}</td>
+                          <td style={{ padding: '6px' }}>{r.specialDay}</td>
+                          <td style={{ padding: '6px' }}>{r.teacher}</td>
+                          <td style={{ padding: '6px' }}>{r.title}</td>
+                          <td style={{ padding: '6px' }}>{r.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      </div>
       ) : (
       <>
       {/* ============ CLASSES / SESSIONS VIEW ============ */}
@@ -1441,6 +1616,11 @@ export default function ChristianEducation() {
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => setView('templates')} style={{ flex: 1 }}>
               🗂️ Templates
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('reports')} style={{ width: '100%' }}>
+              📊 Reports (for One Board)
             </button>
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
