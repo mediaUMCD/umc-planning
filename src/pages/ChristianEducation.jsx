@@ -93,6 +93,9 @@ export default function ChristianEducation() {
   const [newDefaultTemplateId, setNewDefaultTemplateId] = useState('')
   const [addingClass, setAddingClass] = useState(false)
   const [addClassError, setAddClassError] = useState(null)
+  const [importingClasses, setImportingClasses] = useState(false)
+  const [classImportResult, setClassImportResult] = useState(null)
+  const classFileInputRef = useRef(null)
 
   // Add Session form
   const [showAddSession, setShowAddSession] = useState(false)
@@ -344,6 +347,95 @@ export default function ChristianEducation() {
       setAddPersonError(err.message)
     }
     setAddingPerson(false)
+  }
+
+  function handleDownloadClassesTemplate() {
+    const rows = classes.map(c => ({
+      'Class Type': typeMeta(c.class_type).label,
+      'Class Name': c.name || '',
+      'Meeting Day': c.meeting_day || '',
+      'Meeting Time': c.meeting_time || '',
+      'Location': c.location || '',
+      'Leader / Teacher Name': c.leader_name || '',
+      'Default Template (optional)': templates.find(t => t.id === c.default_template_id)?.name || '',
+    }))
+    for (let i = 0; i < 5; i++) rows.push({
+      'Class Type': '', 'Class Name': '', 'Meeting Day': '', 'Meeting Time': '',
+      'Location': '', 'Leader / Teacher Name': '', 'Default Template (optional)': '',
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 22 }, { wch: 24 }]
+    const typeSheet = XLSX.utils.aoa_to_sheet([
+      ['Valid Class Types'],
+      ...CLASS_TYPES.map(t => [t.label]),
+    ])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Classes')
+    XLSX.utils.book_append_sheet(wb, typeSheet, 'Reference')
+    XLSX.writeFile(wb, `ce-classes-template-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  async function handleImportClassesTemplate(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingClasses(true)
+    setClassImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+      let added = 0, updated = 0
+      const skipped = []
+      for (const row of rows) {
+        const name = (row['Class Name'] || '').toString().trim()
+        if (!name) continue // blank template row
+
+        const typeLabel = (row['Class Type'] || '').toString().trim()
+        const typeMatch = CLASS_TYPES.find(t => t.label.toLowerCase() === typeLabel.toLowerCase())
+        if (!typeMatch) { skipped.push(`${name} (unrecognized Class Type "${typeLabel}")`); continue }
+
+        const meetingDayRaw = (row['Meeting Day'] || '').toString().trim()
+        const meetingDay = WEEKDAYS.find(w => w.toLowerCase() === meetingDayRaw.toLowerCase()) || null
+        if (meetingDayRaw && !meetingDay) { skipped.push(`${name} (unrecognized Meeting Day "${meetingDayRaw}")`); continue }
+
+        const templateName = (row['Default Template (optional)'] || '').toString().trim()
+        let defaultTemplateId = null
+        if (templateName) {
+          const tMatch = templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
+          if (!tMatch) { skipped.push(`${name} (unrecognized template "${templateName}")`); continue }
+          defaultTemplateId = tMatch.id
+        }
+
+        const patch = {
+          class_type: typeMatch.value,
+          name,
+          meeting_day: meetingDay,
+          meeting_time: (row['Meeting Time'] || '').toString().trim() || null,
+          location: (row['Location'] || '').toString().trim() || null,
+          leader_name: (row['Leader / Teacher Name'] || '').toString().trim() || null,
+          default_template_id: defaultTemplateId,
+        }
+
+        const existingMatch = classes.find(c => c.name.toLowerCase() === name.toLowerCase())
+        if (existingMatch) {
+          const { error } = await supabase.from('ce_classes').update(patch).eq('id', existingMatch.id)
+          if (error) { skipped.push(`${name} (${error.message})`); continue }
+          updated++
+        } else {
+          const { error } = await supabase.from('ce_classes').insert([patch])
+          if (error) { skipped.push(`${name} (${error.message})`); continue }
+          added++
+        }
+      }
+      setClassImportResult({ added, updated, skipped })
+      await loadClasses()
+    } catch (err) {
+      setClassImportResult({ error: err.message })
+    }
+    setImportingClasses(false)
+    e.target.value = ''
   }
 
   function handleDownloadTeachersTemplate() {
@@ -1359,6 +1451,20 @@ export default function ChristianEducation() {
               📖 Series
             </button>
           </div>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleDownloadClassesTemplate} style={{ flex: 1 }}>
+              📝 Classes Template
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => classFileInputRef.current?.click()} disabled={importingClasses} style={{ flex: 1 }}>
+              {importingClasses ? 'Importing…' : '⬆ Upload Classes'}
+            </button>
+            <input ref={classFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportClassesTemplate} />
+          </div>
+          {classImportResult && (
+            <div style={{ fontSize: '11px', color: classImportResult.error ? 'var(--danger)' : 'var(--gray-400)', marginBottom: '12px' }}>
+              {classImportResult.error || `Added ${classImportResult.added}, updated ${classImportResult.updated}.${classImportResult.skipped?.length ? ` Skipped: ${classImportResult.skipped.join('; ')}` : ''}`}
+            </div>
+          )}
 
           {showAddClass && (
             <form onSubmit={handleAddClass} style={{ background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
