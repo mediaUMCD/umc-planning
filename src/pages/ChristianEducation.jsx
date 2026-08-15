@@ -1815,17 +1815,21 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
               </div>
               {showAddSession && (
                 <form onSubmit={handleAddSession} style={{ marginTop: '10px', background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px' }}>
+                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Date</label>
                   <input type="date" value={newSessionDate} onChange={e => setNewSessionDate(e.target.value)} required
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
+                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Category</label>
                   <select value={newCategory} onChange={e => { setNewCategory(e.target.value); setNewTemplateId('') }}
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                     {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
+                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Template</label>
                   <select value={newTemplateId} onChange={e => setNewTemplateId(e.target.value)}
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                     <option value="">No template (blank session)</option>
                     {templatesForCategory(newCategory).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Topic</label>
                   <input type="text" value={newTopic} onChange={e => setNewTopic(e.target.value)} placeholder="Topic (optional)"
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
                   {addSessionError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addSessionError}</div>}
