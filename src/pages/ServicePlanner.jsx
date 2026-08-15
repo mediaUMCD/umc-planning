@@ -407,6 +407,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [form, setForm] = useState(EMPTY_FORM)
   const [serviceHymns, setServiceHymns] = useState([{ hymnal: 'UMH', number: '', title: '', sort_order: 1, is_closing: false }])
   const [hymnHistory, setHymnHistory] = useState({}) // key: "HYMNAL-NUMBER" → last service_date
+  const [importingBulk, setImportingBulk] = useState(false)
+  const [bulkImportResult, setBulkImportResult] = useState(null)
+  const bulkFileInputRef = useRef(null)
   const [serviceScriptures, setServiceScriptures] = useState([
     { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' },
     { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
@@ -756,6 +759,255 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     const s = (val ?? '').toString()
     if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
     return s
+  }
+
+  async function handleDownloadBulkTemplate() {
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'UMCD Planning Hub'
+    wb.created = new Date()
+
+    const svcSheet = wb.addWorksheet('Services')
+    svcSheet.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Day (reference)', key: 'day', width: 14 },
+      { header: 'Season (reference)', key: 'season', width: 26 },
+      { header: 'Color (reference)', key: 'color', width: 12 },
+      { header: 'Service Type', key: 'service_type', width: 20 },
+      { header: 'Special Designation', key: 'special', width: 28 },
+      { header: 'Sermon Series', key: 'series', width: 22 },
+      { header: 'Spark Title', key: 'spark_title', width: 26 },
+      { header: 'Spark Preacher', key: 'spark_preacher', width: 20 },
+      { header: 'Communion', key: 'communion', width: 12 },
+      { header: 'Liturgist', key: 'liturgist', width: 18 },
+      { header: 'Kids Story Teller', key: 'kids_story', width: 18 },
+    ]
+    svcSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    svcSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const s of services) {
+      svcSheet.addRow({
+        date: s.service_date,
+        day: new Date(s.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+        season: s.season || '',
+        color: s.liturgical_color || '',
+        service_type: s.service_type || '',
+        special: s.special_designation || '',
+        series: s.sermon_series || '',
+        spark_title: s.spark_title || '',
+        spark_preacher: s.spark_preacher || '',
+        communion: s.is_communion ? 'Yes' : '',
+        liturgist: s.liturgist || '',
+        kids_story: s.kids_story_teller || '',
+      })
+    }
+    for (let i = 0; i < 8; i++) svcSheet.addRow({}) // blank rows for new services
+    svcSheet.views = [{ state: 'frozen', ySplit: 1 }]
+
+    const hymnSheet = wb.addWorksheet('Hymns')
+    hymnSheet.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Hymnal (UMH/TFWS/Other)', key: 'hymnal', width: 20 },
+      { header: 'Number', key: 'number', width: 10 },
+      { header: 'Title (optional)', key: 'title', width: 30 },
+      { header: 'Sort Order', key: 'sort_order', width: 12 },
+      { header: 'Closing Hymn?', key: 'closing', width: 14 },
+    ]
+    hymnSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    hymnSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const s of services) {
+      for (const h of (s.service_hymns || []).sort((a, b) => a.sort_order - b.sort_order)) {
+        hymnSheet.addRow({
+          date: s.service_date, hymnal: h.hymnal, number: h.number, title: h.title || '',
+          sort_order: h.sort_order, closing: h.is_closing ? 'Yes' : '',
+        })
+      }
+    }
+    for (let i = 0; i < 10; i++) hymnSheet.addRow({})
+
+    const scriptSheet = wb.addWorksheet('Scriptures')
+    scriptSheet.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Reference', key: 'reference', width: 26 },
+      { header: 'Bible Version', key: 'version', width: 14 },
+      { header: 'Reader', key: 'reader', width: 18 },
+      { header: 'Sort Order', key: 'sort_order', width: 12 },
+      { header: 'Is Gospel?', key: 'gospel', width: 12 },
+    ]
+    scriptSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    scriptSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const s of services) {
+      for (const sc of (s.service_scriptures || []).sort((a, b) => a.sort_order - b.sort_order)) {
+        scriptSheet.addRow({
+          date: s.service_date, reference: sc.reference, version: sc.bible_version || '',
+          reader: sc.reader || '', sort_order: sc.sort_order, gospel: sc.is_gospel ? 'Yes' : '',
+        })
+      }
+    }
+    for (let i = 0; i < 10; i++) scriptSheet.addRow({})
+
+    const refSheet = wb.addWorksheet('Reference')
+    refSheet.addRow(['Valid Service Types'])
+    refSheet.getRow(1).font = { bold: true }
+    for (const t of SERVICE_TYPES) refSheet.addRow([t])
+    refSheet.getColumn(1).width = 24
+    refSheet.addRow([])
+    refSheet.addRow(['Note: Season & Color on the Services tab are shown for reference only —'])
+    refSheet.addRow(['they are calculated automatically from the date and are not read on upload.'])
+    refSheet.addRow(['Hymns and Scriptures tabs: leave a date out entirely to keep that service\'s'])
+    refSheet.addRow(['existing hymns/scripture untouched. Include a date to replace all of that'])
+    refSheet.addRow(['service\'s hymns/scripture with exactly what\'s listed under that date.'])
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `umcd-service-planner-template-${today}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImportBulkTemplate(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingBulk(true)
+    setBulkImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.load(buf)
+
+      const svcSheet = wb.getWorksheet('Services')
+      const hymnSheet = wb.getWorksheet('Hymns')
+      const scriptSheet = wb.getWorksheet('Scriptures')
+      if (!svcSheet) throw new Error('No "Services" sheet found — did you use the downloaded template?')
+
+      const skipped = []
+      let added = 0, updated = 0
+
+      // ── Services ──
+      const svcRows = []
+      svcSheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return
+        const dateCell = row.getCell(1).value
+        const dateStr = dateCell instanceof Date
+          ? dateCell.toISOString().slice(0, 10)
+          : (dateCell ?? '').toString().trim()
+        if (!dateStr) return
+        svcRows.push({
+          date: dateStr,
+          service_type: (row.getCell(5).value ?? '').toString().trim(),
+          special_designation: (row.getCell(6).value ?? '').toString().trim(),
+          sermon_series: (row.getCell(7).value ?? '').toString().trim(),
+          spark_title: (row.getCell(8).value ?? '').toString().trim(),
+          spark_preacher: (row.getCell(9).value ?? '').toString().trim(),
+          communion: (row.getCell(10).value ?? '').toString().trim().toLowerCase() === 'yes',
+          liturgist: (row.getCell(11).value ?? '').toString().trim(),
+          kids_story_teller: (row.getCell(12).value ?? '').toString().trim(),
+        })
+      })
+
+      const dateToId = {}
+      for (const s of services) dateToId[s.service_date] = s.id
+
+      for (const row of svcRows) {
+        const serviceType = row.service_type || 'Regular Sunday'
+        if (!SERVICE_TYPES.includes(serviceType)) {
+          skipped.push(`${row.date} (unrecognized Service Type "${serviceType}")`)
+          continue
+        }
+        const patch = {
+          service_type: serviceType,
+          special_designation: row.special_designation || null,
+          sermon_series: row.sermon_series || null,
+          spark_title: row.spark_title || null,
+          spark_preacher: row.spark_preacher || null,
+          is_communion: row.communion,
+          liturgist: row.liturgist || null,
+          kids_story_teller: row.kids_story_teller || null,
+        }
+
+        if (dateToId[row.date]) {
+          const { error } = await supabase.from('service_dates').update(patch).eq('id', dateToId[row.date])
+          if (error) { skipped.push(`${row.date} (${error.message})`); continue }
+          updated++
+        } else {
+          const seasonInfo = getSeasonFromDate(row.date)
+          const { data, error } = await supabase.from('service_dates')
+            .insert([{ service_date: row.date, season: seasonInfo.season || null, liturgical_color: seasonInfo.color || null, ...patch }])
+            .select().single()
+          if (error) { skipped.push(`${row.date} (${error.message})`); continue }
+          dateToId[row.date] = data.id
+          await supabase.from('upload_tracker').insert(
+            ['service', 'children', 'spark', 'music', 'special', 'podcast_spark', 'podcast_music']
+              .map(t => ({ service_date_id: data.id, upload_type: t, is_uploaded: false, podcast_published: false }))
+          )
+          added++
+        }
+      }
+
+      // ── Hymns (replace-by-date: only touch dates present in the sheet) ──
+      if (hymnSheet) {
+        const hymnsByDate = {}
+        hymnSheet.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return
+          const dateCell = row.getCell(1).value
+          const dateStr = dateCell instanceof Date ? dateCell.toISOString().slice(0, 10) : (dateCell ?? '').toString().trim()
+          const number = row.getCell(3).value
+          if (!dateStr || !number) return
+          if (!hymnsByDate[dateStr]) hymnsByDate[dateStr] = []
+          hymnsByDate[dateStr].push({
+            hymnal: (row.getCell(2).value ?? 'UMH').toString().trim() || 'UMH',
+            number: parseInt(number),
+            title: (row.getCell(4).value ?? '').toString().trim() || null,
+            sort_order: parseInt(row.getCell(5).value) || hymnsByDate[dateStr].length + 1,
+            is_closing: (row.getCell(6).value ?? '').toString().trim().toLowerCase() === 'yes',
+          })
+        })
+        for (const [date, hymnRows] of Object.entries(hymnsByDate)) {
+          const serviceId = dateToId[date]
+          if (!serviceId) { skipped.push(`Hymns for ${date} (no matching service — add it on the Services tab first)`); continue }
+          await supabase.from('service_hymns').delete().eq('service_date_id', serviceId)
+          await supabase.from('service_hymns').insert(
+            hymnRows.map(h => ({ service_date_id: serviceId, ...h }))
+          )
+        }
+      }
+
+      // ── Scriptures (same replace-by-date approach) ──
+      if (scriptSheet) {
+        const scriptsByDate = {}
+        scriptSheet.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return
+          const dateCell = row.getCell(1).value
+          const dateStr = dateCell instanceof Date ? dateCell.toISOString().slice(0, 10) : (dateCell ?? '').toString().trim()
+          const reference = (row.getCell(2).value ?? '').toString().trim()
+          if (!dateStr || !reference) return
+          if (!scriptsByDate[dateStr]) scriptsByDate[dateStr] = []
+          scriptsByDate[dateStr].push({
+            reference,
+            bible_version: (row.getCell(3).value ?? 'CEB').toString().trim() || 'CEB',
+            reader: (row.getCell(4).value ?? '').toString().trim() || null,
+            sort_order: parseInt(row.getCell(5).value) || scriptsByDate[dateStr].length + 1,
+            is_gospel: (row.getCell(6).value ?? '').toString().trim().toLowerCase() === 'yes',
+          })
+        })
+        for (const [date, scriptRows] of Object.entries(scriptsByDate)) {
+          const serviceId = dateToId[date]
+          if (!serviceId) { skipped.push(`Scriptures for ${date} (no matching service — add it on the Services tab first)`); continue }
+          await supabase.from('service_scriptures').delete().eq('service_date_id', serviceId)
+          await supabase.from('service_scriptures').insert(
+            scriptRows.map(s => ({ service_date_id: serviceId, ...s }))
+          )
+        }
+      }
+
+      setBulkImportResult({ added, updated, skipped })
+      await loadServices()
+    } catch (err) {
+      setBulkImportResult({ error: err.message })
+    }
+    setImportingBulk(false)
+    e.target.value = ''
   }
 
   function handleExportCsv() {
@@ -1359,8 +1611,18 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
             {searchDate && <button className="btn btn-secondary btn-sm" onClick={() => setSearchDate('')}>Clear</button>}
             <button className="btn btn-secondary btn-sm" onClick={handleExportCsv} disabled={filteredServices.length === 0}>⬇ CSV</button>
             <button className="btn btn-secondary btn-sm" onClick={handleExportExcel} disabled={filteredServices.length === 0}>📊 Excel</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleDownloadBulkTemplate}>📝 Bulk Template</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => bulkFileInputRef.current?.click()} disabled={importingBulk}>
+              {importingBulk ? 'Importing…' : '⬆ Upload Bulk'}
+            </button>
+            <input ref={bulkFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportBulkTemplate} />
           </div>
         </div>
+        {bulkImportResult && (
+          <div style={{ fontSize: '12px', color: bulkImportResult.error ? 'var(--danger)' : 'var(--gray-600)', marginBottom: '12px', padding: '8px 12px', background: 'var(--gray-50)', borderRadius: '6px' }}>
+            {bulkImportResult.error || `Services — added ${bulkImportResult.added}, updated ${bulkImportResult.updated}.${bulkImportResult.skipped?.length ? ` Skipped: ${bulkImportResult.skipped.join('; ')}` : ''}`}
+          </div>
+        )}
 
         {loading ? <div className="spinner" /> : filteredServices.length === 0 ? (
           <div className="empty-state"><div className="icon">📅</div><p>No services found.</p></div>
