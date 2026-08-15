@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 
 const BUCKET = 'fundraising-images'
@@ -154,6 +155,9 @@ export default function Fundraising() {
   const [showTxForm, setShowTxForm] = useState(false)
   const [exportingZettle, setExportingZettle] = useState(false)
   const [exportError, setExportError] = useState('')
+  const [importingBulk, setImportingBulk] = useState(false)
+  const [bulkImportResult, setBulkImportResult] = useState(null)
+  const bulkFileInputRef = useRef(null)
 
   async function handleExportZettle() {
     setExportingZettle(true)
@@ -166,6 +170,281 @@ export default function Fundraising() {
     }
     downloadCsv(`zettle-import-${new Date().toISOString().slice(0, 10)}.csv`, rows)
     setExportingZettle(false)
+  }
+
+  async function handleDownloadBulkTemplate() {
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'UMCD Planning Hub'
+    wb.created = new Date()
+
+    const prodSheet = wb.addWorksheet('Products')
+    prodSheet.columns = [
+      { header: 'Name', key: 'name', width: 26 },
+      { header: 'Description', key: 'description', width: 34 },
+      { header: 'Cost', key: 'cost', width: 10 },
+      { header: 'Sale Price', key: 'sale_price', width: 12 },
+      { header: 'Fund Source', key: 'fund_source', width: 20 },
+      { header: 'Vendor', key: 'vendor', width: 20 },
+      { header: 'Quantity On Hand (no-variant items only)', key: 'quantity', width: 20 },
+      { header: 'Public?', key: 'is_public', width: 10 },
+      { header: 'Christian Ed Item?', key: 'is_ce', width: 16 },
+    ]
+    prodSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    prodSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const p of products) {
+      prodSheet.addRow({
+        name: p.name, description: p.description || '', cost: p.cost || 0, sale_price: p.sale_price || 0,
+        fund_source: FUND_LABEL[p.fund_source] || p.fund_source || '', vendor: p.vendor || '',
+        quantity: p.variants?.length ? '' : (p.quantity_on_hand ?? 0),
+        is_public: p.is_public ? 'Yes' : '', is_ce: p.is_christian_ed_item ? 'Yes' : '',
+      })
+    }
+    for (let i = 0; i < 8; i++) prodSheet.addRow({})
+
+    const varSheet = wb.addWorksheet('Variants')
+    varSheet.columns = [
+      { header: 'Product Name', key: 'product_name', width: 26 },
+      { header: 'Option Name', key: 'option_name', width: 16 },
+      { header: 'Option Value', key: 'option_value', width: 16 },
+      { header: 'Quantity On Hand', key: 'quantity', width: 16 },
+      { header: 'Sort Order', key: 'sort_order', width: 12 },
+    ]
+    varSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    varSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    for (const p of products) {
+      for (const v of (p.variants || [])) {
+        varSheet.addRow({
+          product_name: p.name, option_name: v.option_name || 'Option', option_value: v.option_value,
+          quantity: v.quantity_on_hand ?? 0, sort_order: v.sort_order ?? 0,
+        })
+      }
+    }
+    for (let i = 0; i < 10; i++) varSheet.addRow({})
+
+    const txSheet = wb.addWorksheet('Transactions')
+    txSheet.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Type', key: 'type', width: 14 },
+      { header: 'Amount', key: 'amount', width: 12 },
+      { header: 'Fund Source', key: 'fund_source', width: 20 },
+      { header: 'Product Name (optional)', key: 'product_name', width: 26 },
+      { header: 'Option Value (optional)', key: 'option_value', width: 18 },
+      { header: 'Quantity (optional)', key: 'quantity', width: 16 },
+      { header: 'Note', key: 'note', width: 30 },
+    ]
+    txSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    txSheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+    // Transactions are a ledger, not a catalog — leave the sheet blank for new
+    // entries only (bulk-importing the entire existing ledger back would
+    // create duplicates), with a few blank rows ready to fill in.
+    for (let i = 0; i < 15; i++) txSheet.addRow({})
+
+    const refSheet = wb.addWorksheet('Reference')
+    refSheet.addRow(['Valid Fund Sources'])
+    refSheet.getRow(1).font = { bold: true }
+    for (const f of FUND_SOURCES) refSheet.addRow([f.label])
+    refSheet.addRow([])
+    refSheet.addRow(['Valid Transaction Types']).font = { bold: true }
+    for (const t of TX_TYPES) refSheet.addRow([t.label.replace(/ \(.+\)/, '')])
+    refSheet.getColumn(1).width = 28
+    refSheet.addRow([])
+    refSheet.addRow(['Notes:'])
+    refSheet.addRow(['Products tab: matched by Name. Quantity On Hand only applies to products'])
+    refSheet.addRow(['with no variants — if a product has variants, its total is calculated from them.'])
+    refSheet.addRow(['Variants tab: leave a product out entirely to keep its existing variants'])
+    refSheet.addRow(['untouched. Include a product and every variant under it fully replaces'])
+    refSheet.addRow(['what\'s currently there for that product.'])
+    refSheet.addRow(['Transactions tab: every filled-in row becomes a NEW ledger entry —'])
+    refSheet.addRow(['this sheet is intentionally left blank on download so re-uploading it'])
+    refSheet.addRow(['doesn\'t create duplicate transactions. Inventory updates automatically'])
+    refSheet.addRow(['for sale/purchase transactions tied to a product, same as manual entry.'])
+
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `umcd-fundraising-template-${new Date().toISOString().slice(0, 10)}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImportBulkTemplate(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingBulk(true)
+    setBulkImportResult(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = new ExcelJS.Workbook()
+      await wb.xlsx.load(buf)
+
+      const prodSheet = wb.getWorksheet('Products')
+      const varSheet = wb.getWorksheet('Variants')
+      const txSheet = wb.getWorksheet('Transactions')
+      if (!prodSheet) throw new Error('No "Products" sheet found — did you use the downloaded template?')
+
+      const skipped = []
+      let productsAdded = 0, productsUpdated = 0, variantsReplaced = 0, txAdded = 0
+
+      const nameToProduct = {}
+      for (const p of products) nameToProduct[p.name.toLowerCase()] = p
+
+      // ── Products ──
+      const prodRows = []
+      prodSheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return
+        const name = (row.getCell(1).value ?? '').toString().trim()
+        if (!name) return
+        prodRows.push({
+          name,
+          description: (row.getCell(2).value ?? '').toString().trim(),
+          cost: Number(row.getCell(3).value) || 0,
+          sale_price: Number(row.getCell(4).value) || 0,
+          fund_source_label: (row.getCell(5).value ?? '').toString().trim(),
+          vendor: (row.getCell(6).value ?? '').toString().trim(),
+          quantity: row.getCell(7).value,
+          is_public: (row.getCell(8).value ?? '').toString().trim().toLowerCase() === 'yes',
+          is_ce: (row.getCell(9).value ?? '').toString().trim().toLowerCase() === 'yes',
+        })
+      })
+
+      for (const row of prodRows) {
+        const fundMatch = FUND_SOURCES.find(f => f.label.toLowerCase() === row.fund_source_label.toLowerCase())
+        if (row.fund_source_label && !fundMatch) {
+          skipped.push(`${row.name} (unrecognized Fund Source "${row.fund_source_label}")`)
+          continue
+        }
+        const existing = nameToProduct[row.name.toLowerCase()]
+        const willHaveVariants = existing?.variants?.length > 0 // bulk import doesn't add first-time variants here — Variants tab does
+        const patch = {
+          name: row.name,
+          description: row.description || null,
+          cost: row.cost,
+          sale_price: row.sale_price,
+          fund_source: fundMatch?.value || 'general',
+          vendor: row.vendor || null,
+          is_public: row.is_public,
+          is_christian_ed_item: row.is_public ? row.is_ce : false,
+        }
+        if (!willHaveVariants) patch.quantity_on_hand = Number(row.quantity) || 0
+
+        if (existing) {
+          const { error } = await supabase.from('fundraising_products').update(patch).eq('id', existing.id)
+          if (error) { skipped.push(`${row.name} (${error.message})`); continue }
+          productsUpdated++
+        } else {
+          const { data, error } = await supabase.from('fundraising_products').insert([{ ...patch, quantity_on_hand: Number(row.quantity) || 0 }]).select().single()
+          if (error) { skipped.push(`${row.name} (${error.message})`); continue }
+          nameToProduct[row.name.toLowerCase()] = { ...data, variants: [] }
+          productsAdded++
+        }
+      }
+
+      // ── Variants (replace-by-product-name) ──
+      if (varSheet) {
+        const variantsByProduct = {}
+        varSheet.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return
+          const productName = (row.getCell(1).value ?? '').toString().trim()
+          const optionValue = (row.getCell(3).value ?? '').toString().trim()
+          if (!productName || !optionValue) return
+          if (!variantsByProduct[productName]) variantsByProduct[productName] = []
+          variantsByProduct[productName].push({
+            option_name: (row.getCell(2).value ?? 'Option').toString().trim() || 'Option',
+            option_value: optionValue,
+            quantity_on_hand: Number(row.getCell(4).value) || 0,
+            sort_order: Number(row.getCell(5).value) || variantsByProduct[productName].length,
+          })
+        })
+        for (const [productName, varRows] of Object.entries(variantsByProduct)) {
+          const product = nameToProduct[productName.toLowerCase()]
+          if (!product) { skipped.push(`Variants for "${productName}" (no matching product — add it on the Products tab first)`); continue }
+          await supabase.from('fundraising_variants').delete().eq('product_id', product.id)
+          await supabase.from('fundraising_variants').insert(varRows.map(v => ({ product_id: product.id, ...v })))
+          const total = varRows.reduce((s, v) => s + v.quantity_on_hand, 0)
+          await supabase.from('fundraising_products').update({ quantity_on_hand: total }).eq('id', product.id)
+          variantsReplaced++
+        }
+      }
+
+      // ── Transactions (always new inserts) ──
+      if (txSheet) {
+        const { data: { user } } = await supabase.auth.getUser()
+        for (let rowNumber = 2; rowNumber <= txSheet.rowCount; rowNumber++) {
+          const row = txSheet.getRow(rowNumber)
+          const dateCell = row.getCell(1).value
+          const dateStr = dateCell instanceof Date ? dateCell.toISOString().slice(0, 10) : (dateCell ?? '').toString().trim()
+          const typeLabel = (row.getCell(2).value ?? '').toString().trim()
+          const amount = row.getCell(3).value
+          if (!dateStr && !typeLabel && (amount === null || amount === undefined)) continue // fully blank row
+          if (!dateStr || !typeLabel || amount === null || amount === undefined) {
+            skipped.push(`Transaction row ${rowNumber} (missing Date, Type, or Amount)`)
+            continue
+          }
+          const typeMatch = TX_TYPES.find(t => t.label.replace(/ \(.+\)/, '').toLowerCase() === typeLabel.toLowerCase())
+          if (!typeMatch) { skipped.push(`Transaction row ${rowNumber} (unrecognized Type "${typeLabel}")`); continue }
+
+          const fundLabel = (row.getCell(4).value ?? '').toString().trim()
+          const fundMatch = FUND_SOURCES.find(f => f.label.toLowerCase() === fundLabel.toLowerCase())
+          if (fundLabel && !fundMatch) { skipped.push(`Transaction row ${rowNumber} (unrecognized Fund Source "${fundLabel}")`); continue }
+
+          const productName = (row.getCell(5).value ?? '').toString().trim()
+          const optionValue = (row.getCell(6).value ?? '').toString().trim()
+          const quantity = row.getCell(7).value
+          const note = (row.getCell(8).value ?? '').toString().trim()
+
+          let product = null, variant = null
+          if (productName) {
+            product = nameToProduct[productName.toLowerCase()]
+            if (!product) { skipped.push(`Transaction row ${rowNumber} (no matching product "${productName}")`); continue }
+            if (optionValue) {
+              variant = (product.variants || []).find(v => v.option_value.toLowerCase() === optionValue.toLowerCase())
+              if (!variant) { skipped.push(`Transaction row ${rowNumber} (no matching option "${optionValue}" on "${productName}")`); continue }
+            }
+          }
+
+          const payload = {
+            type: typeMatch.value,
+            amount: Number(amount),
+            fund_source: fundMatch?.value || 'general',
+            product_id: product?.id || null,
+            variant_id: variant?.id || null,
+            quantity: quantity ? Number(quantity) : null,
+            note: note || null,
+            transaction_date: dateStr,
+            created_by: user?.id || null,
+          }
+          const { error } = await supabase.from('fundraising_transactions').insert([payload])
+          if (error) { skipped.push(`Transaction row ${rowNumber} (${error.message})`); continue }
+          txAdded++
+
+          if (product && quantity) {
+            const delta = typeMatch.value === 'sale' ? -Number(quantity) : typeMatch.value === 'purchase' ? Number(quantity) : 0
+            if (delta !== 0) {
+              if (variant) {
+                const newQty = Math.max(0, Number(variant.quantity_on_hand || 0) + delta)
+                await supabase.from('fundraising_variants').update({ quantity_on_hand: newQty }).eq('id', variant.id)
+                variant.quantity_on_hand = newQty
+                const newTotal = (product.variants || []).reduce((s, v) => s + Number(v.quantity_on_hand || 0), 0)
+                await supabase.from('fundraising_products').update({ quantity_on_hand: newTotal }).eq('id', product.id)
+              } else {
+                const newQty = Math.max(0, Number(product.quantity_on_hand || 0) + delta)
+                await supabase.from('fundraising_products').update({ quantity_on_hand: newQty }).eq('id', product.id)
+                product.quantity_on_hand = newQty
+              }
+            }
+          }
+        }
+      }
+
+      setBulkImportResult({ productsAdded, productsUpdated, variantsReplaced, txAdded, skipped })
+      await load()
+    } catch (err) {
+      setBulkImportResult({ error: err.message })
+    }
+    setImportingBulk(false)
+    e.target.value = ''
   }
 
   useEffect(() => { load() }, [])
@@ -256,16 +535,34 @@ export default function Fundraising() {
           </div>
         </div>
         {tab === 'inventory' ? (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={handleExportZettle} disabled={exportingZettle}>
               {exportingZettle ? 'Exporting…' : '📤 Export to Zettle CSV'}
             </button>
+            <button className="btn btn-secondary" onClick={handleDownloadBulkTemplate}>📝 Bulk Template</button>
+            <button className="btn btn-secondary" onClick={() => bulkFileInputRef.current?.click()} disabled={importingBulk}>
+              {importingBulk ? 'Importing…' : '⬆ Upload Bulk'}
+            </button>
+            <input ref={bulkFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportBulkTemplate} />
             <button className="btn btn-primary" onClick={openAddProduct}>+ Add Product</button>
           </div>
         ) : tab === 'ledger' ? (
-          <button className="btn btn-primary" onClick={() => setShowTxForm(true)}>+ Log Transaction</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={handleDownloadBulkTemplate}>📝 Bulk Template</button>
+            <button className="btn btn-secondary" onClick={() => bulkFileInputRef.current?.click()} disabled={importingBulk}>
+              {importingBulk ? 'Importing…' : '⬆ Upload Bulk'}
+            </button>
+            <input ref={bulkFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportBulkTemplate} />
+            <button className="btn btn-primary" onClick={() => setShowTxForm(true)}>+ Log Transaction</button>
+          </div>
         ) : null}
       </div>
+
+      {bulkImportResult && (
+        <div style={{ fontSize: '12px', color: bulkImportResult.error ? 'var(--danger)' : 'var(--gray-600)', margin: '0 24px 12px', padding: '8px 12px', background: 'var(--gray-50)', borderRadius: '6px' }}>
+          {bulkImportResult.error || `Products — added ${bulkImportResult.productsAdded}, updated ${bulkImportResult.productsUpdated}. Variant sets replaced: ${bulkImportResult.variantsReplaced}. Transactions added: ${bulkImportResult.txAdded}.${bulkImportResult.skipped?.length ? ` Skipped: ${bulkImportResult.skipped.join('; ')}` : ''}`}
+        </div>
+      )}
 
       {exportError && (
         <div className="alert alert-error" style={{ margin: '0 24px 12px' }}>{exportError}</div>
