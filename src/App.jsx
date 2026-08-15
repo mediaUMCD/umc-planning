@@ -27,6 +27,7 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [selectedServiceId, setSelectedServiceId] = useState(null)
   const [editServiceId, setEditServiceId] = useState(null)
+  const [ceTarget, setCeTarget] = useState(null)
 
   // Public, unauthenticated route — no login required, no sidebar
   if (PUBLIC_PATHS.includes(window.location.pathname)) {
@@ -86,11 +87,18 @@ export default function App() {
     setPage('planner')
   }
 
+  // Deep-links from the Dashboard into a specific CE class/session or series.
+  // target: { classId, sessionId } for a session, or { seriesId } for a series.
+  const navigateToCE = (target) => {
+    setCeTarget(target)
+    setPage('christian-education')
+  }
+
   const renderPage = () => {
     if (isFinanceOnly) return <CheckRequests />
 
     switch (page) {
-      case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} />
+      case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} onViewCE={navigateToCE} />
       case 'planner': return (
         <ServicePlanner
           onViewService={navigateToService}
@@ -106,7 +114,7 @@ export default function App() {
         />
       )
       case 'hymns': return <HymnTracker />
-      case 'christian-education': return <ChristianEducation />
+      case 'christian-education': return <ChristianEducation initialTarget={ceTarget} onConsumeTarget={() => setCeTarget(null)} />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />

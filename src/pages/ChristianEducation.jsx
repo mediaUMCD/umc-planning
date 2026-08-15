@@ -66,7 +66,7 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-export default function ChristianEducation() {
+export default function ChristianEducation({ initialTarget, onConsumeTarget } = {}) {
   const [view, setView] = useState('sessions') // 'sessions' | 'templates'
 
   const [classes, setClasses] = useState([])
@@ -193,6 +193,31 @@ export default function ChristianEducation() {
   const [seriesError, setSeriesError] = useState(null)
 
   useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries() }, [])
+
+  // Deep-link support from the Dashboard: jump straight to a specific
+  // session, class, or series instead of landing on the default list.
+  useEffect(() => {
+    if (!initialTarget || loadingClasses || loadingSeries) return
+    if (initialTarget.seriesId) {
+      setView('series')
+      setExpandedSeriesId(initialTarget.seriesId)
+      onConsumeTarget?.()
+    } else if (initialTarget.classId) {
+      const cls = classes.find(c => c.id === initialTarget.classId)
+      if (cls) {
+        setView('sessions')
+        selectClass(cls).then(() => {
+          if (initialTarget.sessionId) {
+            // selectClass loads sessions asynchronously; grab the fresh list
+            // straight from Supabase rather than relying on stale closure state.
+            supabase.from('ce_sessions').select('*').eq('id', initialTarget.sessionId).maybeSingle()
+              .then(({ data }) => { if (data) selectSession(data) })
+          }
+        })
+      }
+      onConsumeTarget?.()
+    }
+  }, [initialTarget, loadingClasses, loadingSeries, classes])
 
   async function loadClasses() {
     setLoadingClasses(true)
