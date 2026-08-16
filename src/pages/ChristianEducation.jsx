@@ -76,6 +76,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
   const [sessions, setSessions] = useState([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionCategoryFilter, setSessionCategoryFilter] = useState('all')
   const [selectedSession, setSelectedSession] = useState(null)
 
   const [templates, setTemplates] = useState([])
@@ -135,6 +136,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
   // Attendance / push
   const [headcount, setHeadcount] = useState('')
+  const [guestCount, setGuestCount] = useState('')
   const [savingHeadcount, setSavingHeadcount] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [pushError, setPushError] = useState(null)
@@ -625,11 +627,12 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setSelectedSession(null)
     setPushError(null)
     setSessionsLoading(true)
+    setSessionCategoryFilter('all')
     const { data } = await supabase
       .from('ce_sessions')
       .select('*')
       .eq('class_id', cls.id)
-      .order('session_date', { ascending: false })
+      .order('session_date', { ascending: true })
     setSessions(data || [])
     setSessionsLoading(false)
   }
@@ -641,6 +644,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setMaterialsNeeded(session.materials_needed || '')
     setStatus(session.status || 'planned')
     setHeadcount(session.headcount ?? '')
+    setGuestCount(session.guest_count ?? '')
     setFieldValues(session.field_values || {})
     setSessionError(null)
     setFieldsError(null)
@@ -1082,11 +1086,12 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setSavingHeadcount(true)
     setSessionError(null)
     const val = headcount === '' ? null : parseInt(headcount)
-    const { error } = await supabase.from('ce_sessions').update({ headcount: val }).eq('id', selectedSession.id)
+    const guestVal = guestCount === '' ? null : parseInt(guestCount)
+    const { error } = await supabase.from('ce_sessions').update({ headcount: val, guest_count: guestVal }).eq('id', selectedSession.id)
     if (error) {
       setSessionError(`Couldn't save headcount: ${error.message}`)
     } else {
-      const merged = { ...selectedSession, headcount: val }
+      const merged = { ...selectedSession, headcount: val, guest_count: guestVal }
       setSelectedSession(merged)
       setSessions(prev => prev.map(s => s.id === merged.id ? merged : s))
     }
@@ -1098,6 +1103,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setPushing(true)
     setPushError(null)
     const val = headcount === '' ? null : parseInt(headcount)
+    const guestVal = guestCount === '' ? null : parseInt(guestCount)
     if (val === null) {
       setPushError('Enter a headcount before pushing to the Attendance Tracker.')
       setPushing(false)
@@ -1110,7 +1116,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       if (attendanceEventId) {
         const { error } = await supabase
           .from('attendance_events')
-          .update({ headcount: val, event_name: `${selectedClass.name}${topic ? ' — ' + topic : ''}` })
+          .update({ headcount: val, guest_count: guestVal, event_name: `${selectedClass.name}${topic ? ' — ' + topic : ''}` })
           .eq('id', attendanceEventId)
         if (error) throw error
       } else {
@@ -1122,6 +1128,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
             event_type: eventType,
             source_app: 'ce_planning',
             headcount: val,
+            guest_count: guestVal,
           }])
           .select()
           .single()
@@ -1131,6 +1138,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
       const updates = {
         headcount: val,
+        guest_count: guestVal,
         attendance_pushed: true,
         attendance_pushed_at: new Date().toISOString(),
         attendance_event_id: attendanceEventId,
@@ -1227,6 +1235,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   const filteredClasses = classes.filter(c => filterType === 'all' ? true : c.class_type === filterType)
+  const filteredSessions = sessions.filter(s => sessionCategoryFilter === 'all' ? true : s.category === sessionCategoryFilter)
 
   // ---- Dynamic field renderer ----
   function renderFieldInput(field) {
@@ -1938,12 +1947,19 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 </form>
               )}
             </div>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--gray-100)' }}>
+              <select value={sessionCategoryFilter} onChange={e => setSessionCategoryFilter(e.target.value)}
+                style={{ width: '100%', padding: '5px 8px', fontSize: '12px' }}>
+                <option value="all">All Categories</option>
+                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
-              {sessionsLoading ? <div className="spinner" /> : sessions.length === 0 ? (
+              {sessionsLoading ? <div className="spinner" /> : filteredSessions.length === 0 ? (
                 <div style={{ padding: '24px', fontSize: '13px', color: 'var(--gray-400)', textAlign: 'center' }}>
-                  No sessions planned yet.
+                  {sessions.length === 0 ? 'No sessions planned yet.' : 'No sessions match this filter.'}
                 </div>
-              ) : sessions.map(s => (
+              ) : filteredSessions.map(s => (
                 <div
                   key={s.id}
                   onClick={() => selectSession(s)}
@@ -2110,16 +2126,21 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 ✅ Attendance
               </h3>
               <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>
-                Per-person attendance will be available once the Attendance Tracker app is live and rosters are set up. For now, record a headcount and push it — it'll already be sitting in the shared attendance data once that app exists.
+                Record a headcount and any additional guests, then push it — it lands in the shared attendance data used by Directory/Attendance Tracker. Per-person, name-level attendance for CE classes isn't built yet; this pushes an aggregate count per session.
               </div>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '12px', flexWrap: 'wrap' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Headcount</label>
                   <input type="number" min="0" value={headcount} onChange={e => setHeadcount(e.target.value)}
                     style={{ width: '100px', padding: '6px 8px', fontSize: '13px' }} />
                 </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Guests</label>
+                  <input type="number" min="0" value={guestCount} onChange={e => setGuestCount(e.target.value)}
+                    style={{ width: '100px', padding: '6px 8px', fontSize: '13px' }} />
+                </div>
                 <button className="btn btn-secondary btn-sm" onClick={handleSaveHeadcount} disabled={savingHeadcount}>
-                  {savingHeadcount ? 'Saving…' : 'Save Headcount'}
+                  {savingHeadcount ? 'Saving…' : 'Save'}
                 </button>
               </div>
 
