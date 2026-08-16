@@ -35,6 +35,7 @@ const FIELD_TYPES = [
   { value: 'select', label: 'Dropdown' },
   { value: 'date', label: 'Date' },
   { value: 'person', label: 'Person (Teacher lookup)' },
+  { value: 'people', label: 'Multiple People (Teacher lookup)' },
 ]
 
 function typeMeta(value) {
@@ -1262,6 +1263,24 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           <option value="">— Select —</option>
           {teachers.map(p => <option key={p.id} value={p.id}>{personLabel(p)}</option>)}
         </select>
+      )
+    }
+    if (field.type === 'people') {
+      const selected = Array.isArray(val) ? val : []
+      const toggle = (personId) => {
+        set(selected.includes(personId) ? selected.filter(id => id !== personId) : [...selected, personId])
+      }
+      return (
+        <div style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', maxHeight: '160px', overflowY: 'auto' }}>
+          {teachers.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>No teachers tagged yet — add some under the Teachers tab.</div>
+          ) : teachers.map(p => (
+            <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '3px 0', cursor: 'pointer' }}>
+              <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} />
+              {personLabel(p)}
+            </label>
+          ))}
+        </div>
       )
     }
     return <input type="text" value={val} onChange={e => set(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
