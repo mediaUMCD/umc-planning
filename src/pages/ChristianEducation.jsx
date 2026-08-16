@@ -93,6 +93,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const [newDefaultTemplateId, setNewDefaultTemplateId] = useState('')
   const [addingClass, setAddingClass] = useState(false)
   const [addClassError, setAddClassError] = useState(null)
+  const [editingClassId, setEditingClassId] = useState(null)
   const [importingClasses, setImportingClasses] = useState(false)
   const [classImportResult, setClassImportResult] = useState(null)
   const classFileInputRef = useRef(null)
@@ -743,6 +744,86 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       setAddClassError(err.message)
     }
     setAddingClass(false)
+  }
+
+  function startEditClass(cls) {
+    setEditingClassId(cls.id)
+    setNewClassType(cls.class_type)
+    setNewClassName(cls.name)
+    setNewMeetingDay(cls.meeting_day || '')
+    setNewMeetingTime(cls.meeting_time || '')
+    setNewLocation(cls.location || '')
+    setNewLeader(cls.leader_name || '')
+    setNewDefaultTemplateId(cls.default_template_id || '')
+    setShowAddClass(true)
+    setAddClassError(null)
+  }
+
+  function cancelEditClass() {
+    setEditingClassId(null)
+    setNewClassType('adult_sunday_school'); setNewClassName(''); setNewMeetingDay('')
+    setNewMeetingTime(''); setNewLocation(''); setNewLeader(''); setNewDefaultTemplateId('')
+    setShowAddClass(false)
+    setAddClassError(null)
+  }
+
+  async function handleSaveClass(e) {
+    e.preventDefault()
+    if (editingClassId) {
+      setAddingClass(true)
+      setAddClassError(null)
+      try {
+        const patch = {
+          class_type: newClassType,
+          name: newClassName,
+          meeting_day: newMeetingDay || null,
+          meeting_time: newMeetingTime || null,
+          location: newLocation || null,
+          leader_name: newLeader || null,
+          default_template_id: newDefaultTemplateId || null,
+        }
+        const { data, error } = await supabase.from('ce_classes').update(patch).eq('id', editingClassId).select().single()
+        if (error) throw error
+        setClasses(prev => prev.map(c => c.id === editingClassId ? data : c).sort((a, b) => a.name.localeCompare(b.name)))
+        if (selectedClass?.id === editingClassId) setSelectedClass(data)
+        cancelEditClass()
+      } catch (err) {
+        setAddClassError(err.message)
+      }
+      setAddingClass(false)
+    } else {
+      await handleAddClass(e)
+    }
+  }
+
+  async function handleDeleteClass(cls) {
+    const { count } = await supabase.from('ce_sessions').select('id', { count: 'exact', head: true }).eq('class_id', cls.id)
+    const sessionWarning = count > 0 ? ` This will also delete its ${count} session${count === 1 ? '' : 's'}.` : ''
+    if (!confirm(`Delete "${cls.name}"?${sessionWarning} This cannot be undone.`)) return
+    try {
+      if (count > 0) {
+        const { error: sessErr } = await supabase.from('ce_sessions').delete().eq('class_id', cls.id)
+        if (sessErr) throw sessErr
+      }
+      const { error } = await supabase.from('ce_classes').delete().eq('id', cls.id)
+      if (error) throw error
+      setClasses(prev => prev.filter(c => c.id !== cls.id))
+      if (selectedClass?.id === cls.id) { setSelectedClass(null); setSessions([]); setSelectedSession(null) }
+    } catch (err) {
+      alert('Could not delete class: ' + err.message)
+    }
+  }
+
+  async function handleDeleteSession(session) {
+    if (!confirm(`Delete this session (${formatDate(session.session_date)})? This cannot be undone.`)) return
+    try {
+      const { error } = await supabase.from('ce_sessions').delete().eq('id', session.id)
+      if (error) throw error
+      setSessions(prev => prev.filter(s => s.id !== session.id))
+      if (selectedSession?.id === session.id) setSelectedSession(null)
+    } catch (err) {
+      alert('Could not delete session: ' + err.message)
+    }
   }
 
   async function handleAddSession(e) {
@@ -1636,7 +1717,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '19px', color: 'var(--burgundy)' }}>Christian Education</h1>
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowAddClass(s => !s)} style={{ flex: 1 }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => showAddClass ? cancelEditClass() : setShowAddClass(true)} style={{ flex: 1 }}>
               {showAddClass ? '✕ Cancel' : '+ Add Class'}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => setView('templates')} style={{ flex: 1 }}>
@@ -1672,7 +1753,8 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           )}
 
           {showAddClass && (
-            <form onSubmit={handleAddClass} style={{ background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
+            <form onSubmit={handleSaveClass} style={{ background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
+              {editingClassId && <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '6px' }}>Editing Class</div>}
               <select value={newClassType} onChange={e => setNewClassType(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                 {CLASS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
@@ -1707,7 +1789,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
               </select>
               {addClassError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addClassError}</div>}
               <button type="submit" className="btn btn-primary btn-sm" disabled={addingClass} style={{ width: '100%' }}>
-                {addingClass ? 'Adding…' : 'Add Class'}
+                {addingClass ? 'Saving…' : editingClassId ? 'Save Changes' : 'Add Class'}
               </button>
             </form>
           )}
@@ -1741,17 +1823,30 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                   padding: '12px 16px', cursor: 'pointer',
                   borderBottom: '1px solid var(--gray-100)',
                   background: selectedClass?.id === cls.id ? 'var(--burgundy-light)' : 'white',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px',
                 }}
               >
-                <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: meta.bg, color: meta.fg }}>
-                  {meta.label}
-                </span>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--gray-800)', marginTop: '4px' }}>{cls.name}</div>
-                {(cls.meeting_day || cls.meeting_time) && (
-                  <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
-                    {[cls.meeting_day, cls.meeting_time].filter(Boolean).join(' · ')}
-                  </div>
-                )}
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: meta.bg, color: meta.fg }}>
+                    {meta.label}
+                  </span>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--gray-800)', marginTop: '4px' }}>{cls.name}</div>
+                  {(cls.meeting_day || cls.meeting_time) && (
+                    <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                      {[cls.meeting_day, cls.meeting_time].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                  <button onClick={e => { e.stopPropagation(); startEditClass(cls) }} title="Edit class"
+                    style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
+                    ✎
+                  </button>
+                  <button onClick={e => { e.stopPropagation(); handleDeleteClass(cls) }} title="Delete class"
+                    style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
+                    🗑
+                  </button>
+                </div>
               </div>
             )
           })}
@@ -1774,6 +1869,10 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
               {selectedClass.leader_name && (
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>Led by {selectedClass.leader_name}</div>
               )}
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => startEditClass(selectedClass)} style={{ flex: 1 }}>✎ Edit Class</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteClass(selectedClass)} style={{ flex: 1, color: 'var(--danger)' }}>🗑 Delete Class</button>
+              </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => {
                   setShowAddSession(s => {
@@ -1856,7 +1955,13 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--gray-800)' }}>{formatDate(s.session_date)}</span>
-                    {s.attendance_pushed && <span title="Pushed to Attendance Tracker" style={{ fontSize: '11px' }}>✅</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {s.attendance_pushed && <span title="Pushed to Attendance Tracker" style={{ fontSize: '11px' }}>✅</span>}
+                      <button onClick={e => { e.stopPropagation(); handleDeleteSession(s) }} title="Delete session"
+                        style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
+                        🗑
+                      </button>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
                     {s.category && (
@@ -1897,6 +2002,9 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 <select value={status} onChange={e => setStatus(e.target.value)} style={{ fontSize: '12px', padding: '4px 8px' }}>
                   {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+                <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSession(selectedSession)} style={{ color: 'var(--danger)', marginLeft: '8px' }}>
+                  🗑 Delete
+                </button>
               </div>
 
               <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Topic</label>
