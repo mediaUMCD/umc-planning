@@ -36,6 +36,7 @@ const FIELD_TYPES = [
   { value: 'date', label: 'Date' },
   { value: 'person', label: 'Person (Teacher lookup)' },
   { value: 'people', label: 'Multiple People (Teacher lookup)' },
+  { value: 'supplies_checklist', label: 'Supplies Checklist' },
 ]
 
 function typeMeta(value) {
@@ -83,6 +84,10 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const [templates, setTemplates] = useState([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [teachers, setTeachers] = useState([])
+  const [supplies, setSupplies] = useState([])
+  const [loadingSupplies, setLoadingSupplies] = useState(true)
+  const [newSupplyName, setNewSupplyName] = useState('')
+  const [addingSupply, setAddingSupply] = useState(false)
 
   // Add Class form
   const [showAddClass, setShowAddClass] = useState(false)
@@ -196,7 +201,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const [savingSeries, setSavingSeries] = useState(false)
   const [seriesError, setSeriesError] = useState(null)
 
-  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries() }, [])
+  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries(); loadSupplies() }, [])
 
   // Deep-link support from the Dashboard: jump straight to a specific
   // session, class, or series instead of landing on the default list.
@@ -256,6 +261,31 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       .select('people(*)')
       .eq('tag_id', tagId)
     setTeachers((data || []).map(row => row.people).filter(Boolean).sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '')))
+  }
+
+  async function loadSupplies() {
+    setLoadingSupplies(true)
+    const { data } = await supabase.from('ce_supplies').select('*').eq('is_active', true).order('sort_order', { ascending: true }).order('name', { ascending: true })
+    setSupplies(data || [])
+    setLoadingSupplies(false)
+  }
+
+  async function handleAddSupply(e) {
+    e.preventDefault()
+    if (!newSupplyName.trim()) return
+    setAddingSupply(true)
+    const { data, error } = await supabase.from('ce_supplies').insert([{ name: newSupplyName.trim() }]).select().single()
+    if (!error) {
+      setSupplies(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewSupplyName('')
+    }
+    setAddingSupply(false)
+  }
+
+  async function handleDeleteSupply(supplyId) {
+    if (!confirm('Remove this supply from the list? It stays on any sessions that already checked it, but disappears from the checklist for future ones.')) return
+    await supabase.from('ce_supplies').update({ is_active: false }).eq('id', supplyId)
+    setSupplies(prev => prev.filter(s => s.id !== supplyId))
   }
 
   async function loadSeries() {
@@ -1293,6 +1323,31 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
         </div>
       )
     }
+    if (field.type === 'supplies_checklist') {
+      const current = (val && typeof val === 'object' && !Array.isArray(val)) ? val : { checked: [], additional: '' }
+      const checked = current.checked || []
+      const toggle = (supplyId) => {
+        set({ ...current, checked: checked.includes(supplyId) ? checked.filter(id => id !== supplyId) : [...checked, supplyId] })
+      }
+      return (
+        <div>
+          <div style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', maxHeight: '160px', overflowY: 'auto', marginBottom: '6px' }}>
+            {supplies.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>No supplies in the list yet — add some under the Supplies tab.</div>
+            ) : supplies.map(s => (
+              <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '3px 0', cursor: 'pointer' }}>
+                <input type="checkbox" checked={checked.includes(s.id)} onChange={() => toggle(s.id)} />
+                {s.name}
+              </label>
+            ))}
+          </div>
+          <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Additional Supplies</label>
+          <input type="text" value={current.additional || ''} onChange={e => set({ ...current, additional: e.target.value })}
+            placeholder="Anything not on the list above"
+            style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
+        </div>
+      )
+    }
     return <input type="text" value={val} onChange={e => set(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
   }
 
@@ -1658,6 +1713,45 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           })}
         </div>
       </div>
+      ) : view === 'supplies' ? (
+
+      /* ============ SUPPLIES VIEW ============ */
+      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
+        <div style={{ padding: '24px', maxWidth: '520px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)' }}>Supplies</h1>
+              <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
+                Manage the master list used by any "Supplies Checklist" field on session templates.
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
+          </div>
+
+          <form onSubmit={handleAddSupply} className="card" style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+            <input type="text" value={newSupplyName} onChange={e => setNewSupplyName(e.target.value)} placeholder="e.g. Glue sticks, Construction paper"
+              style={{ flex: 1, padding: '8px 10px', fontSize: '13px' }} />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={addingSupply || !newSupplyName.trim()}>
+              {addingSupply ? 'Adding…' : '+ Add'}
+            </button>
+          </form>
+
+          {loadingSupplies ? <div className="spinner" /> : supplies.length === 0 ? (
+            <div className="empty-state"><div className="icon">🧺</div><p>No supplies added yet.</p></div>
+          ) : (
+            <div className="card">
+              {supplies.map(s => (
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--gray-100)' }}>
+                  <span style={{ fontSize: '14px', color: 'var(--gray-800)' }}>{s.name}</span>
+                  <button onClick={() => handleDeleteSupply(s.id)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
       ) : view === 'reports' ? (
 
       /* ============ REPORTS VIEW (One Board) ============ */
@@ -1779,6 +1873,9 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => setView('series')} style={{ flex: 1 }}>
               📖 Series
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('supplies')} style={{ flex: 1 }}>
+              🧺 Supplies
             </button>
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
