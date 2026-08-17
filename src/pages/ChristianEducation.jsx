@@ -1191,6 +1191,16 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setTemplateFields(prev => prev.filter((_, i) => i !== idx))
   }
 
+  function moveTemplateField(idx, direction) {
+    setTemplateFields(prev => {
+      const next = [...prev]
+      const target = idx + direction
+      if (target < 0 || target >= next.length) return prev
+      ;[next[idx], next[target]] = [next[target], next[idx]]
+      return next
+    })
+  }
+
   async function handleSaveTemplate(e) {
     e.preventDefault()
     setSavingTemplate(true)
@@ -1327,6 +1337,12 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
                   {templateFields.map((f, idx) => (
                     <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--gray-50)', padding: '8px', borderRadius: '6px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', flexShrink: 0 }}>
+                        <button type="button" onClick={() => moveTemplateField(idx, -1)} disabled={idx === 0} title="Move up"
+                          style={{ fontSize: '11px', lineHeight: 1, padding: '2px 4px', background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--gray-200)' : 'var(--burgundy)' }}>▲</button>
+                        <button type="button" onClick={() => moveTemplateField(idx, 1)} disabled={idx === templateFields.length - 1} title="Move down"
+                          style={{ fontSize: '11px', lineHeight: 1, padding: '2px 4px', background: 'none', border: 'none', cursor: idx === templateFields.length - 1 ? 'default' : 'pointer', color: idx === templateFields.length - 1 ? 'var(--gray-200)' : 'var(--burgundy)' }}>▼</button>
+                      </div>
                       <input type="text" value={f.label} onChange={e => updateTemplateField(idx, { label: e.target.value })} placeholder="Field label (e.g. Scripture)"
                         style={{ flex: 2, padding: '6px 8px', fontSize: '12px' }} />
                       <select value={f.type} onChange={e => updateTemplateField(idx, { type: e.target.value })} style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }}>
