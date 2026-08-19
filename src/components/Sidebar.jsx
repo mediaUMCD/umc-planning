@@ -22,6 +22,7 @@ const FINANCE_ONLY_NAV_ITEMS = [
 const OTHER_APPS = [
   { label: 'Church App',  href: 'https://app.umcdanielson.org',      icon: '📱' },
   { label: 'One Board',   href: 'https://board.umcdanielson.org',     icon: '📋' },
+  { label: 'Event Planning', href: 'https://board.umcdanielson.org/events', icon: '🎪' },
   { label: 'Website',     href: 'https://umcdanielson.org',           icon: '🌐' },
   { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
