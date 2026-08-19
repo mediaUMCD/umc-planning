@@ -68,6 +68,70 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
+// Small reusable "More actions" dropdown — used to keep panel headers from
+// turning into walls of buttons. Closes itself after any item is clicked.
+function ActionsMenu({ label = '⋮ More', open, setOpen, items }) {
+  return (
+    <div style={{ position: 'relative', flex: 1 }}>
+      <button className="btn btn-secondary btn-sm" onClick={() => setOpen(o => !o)} style={{ width: '100%' }}>
+        {label} {open ? '▲' : '▼'}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 11,
+            background: 'white', border: '1px solid var(--gray-100)', borderRadius: '8px',
+            boxShadow: '0 4px 16px rgba(61,0,38,0.15)', overflow: 'hidden', minWidth: '200px',
+          }}>
+            {items.map((item, i) => item.divider ? (
+              <div key={i} style={{ borderTop: '1px solid var(--gray-100)', margin: '4px 0' }} />
+            ) : (
+              <button
+                key={i}
+                onClick={() => { setOpen(false); item.onClick?.() }}
+                disabled={item.disabled}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
+                  fontSize: '13px', background: 'none', border: 'none', cursor: item.disabled ? 'default' : 'pointer',
+                  color: item.disabled ? 'var(--gray-200)' : 'var(--gray-800)',
+                }}
+                onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = 'var(--gray-50)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Thin collapsed-state strip shown in place of a full panel — click to expand.
+function CollapsedPanelStrip({ label, onExpand }) {
+  return (
+    <div
+      onClick={onExpand}
+      style={{
+        width: '36px', flexShrink: 0, borderRight: '1px solid var(--gray-100)', background: 'white',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '16px', gap: '10px',
+        cursor: 'pointer',
+      }}
+      title={`Show ${label}`}
+    >
+      <span style={{ fontSize: '13px', color: 'var(--burgundy)' }}>▶</span>
+      <span style={{
+        writingMode: 'vertical-rl', fontSize: '11px', fontWeight: 700, color: 'var(--gray-400)',
+        letterSpacing: '0.05em', textTransform: 'uppercase',
+      }}>
+        {label}
+      </span>
+    </div>
+  )
+}
+
 export default function ChristianEducation({ initialTarget, onConsumeTarget } = {}) {
   const [view, setView] = useState('sessions') // 'sessions' | 'templates'
 
@@ -91,6 +155,10 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
   // Add Class form
   const [showAddClass, setShowAddClass] = useState(false)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [middleCollapsed, setMiddleCollapsed] = useState(false)
+  const [leftMenuOpen, setLeftMenuOpen] = useState(false)
+  const [middleMenuOpen, setMiddleMenuOpen] = useState(false)
   const [newClassType, setNewClassType] = useState('adult_sunday_school')
   const [newClassName, setNewClassName] = useState('')
   const [newMeetingDay, setNewMeetingDay] = useState('')
@@ -1849,42 +1917,33 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       {/* ============ CLASSES / SESSIONS VIEW ============ */}
 
       {/* Left panel — class list */}
+      {leftCollapsed ? (
+        <CollapsedPanelStrip label="Classes" onExpand={() => setLeftCollapsed(false)} />
+      ) : (
       <div style={{ width: '380px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--gray-100)', background: 'white' }}>
         <div style={{ padding: '20px', borderBottom: '1px solid var(--gray-100)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '19px', color: 'var(--burgundy)' }}>Christian Education</h1>
+            <button onClick={() => setLeftCollapsed(true)} title="Collapse panel"
+              style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '14px', padding: '4px' }}>
+              ◀
+            </button>
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => showAddClass ? cancelEditClass() : setShowAddClass(true)} style={{ flex: 1 }}>
               {showAddClass ? '✕ Cancel' : '+ Add Class'}
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('templates')} style={{ flex: 1 }}>
-              🗂️ Templates
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('reports')} style={{ width: '100%' }}>
-              📊 Reports (for One Board)
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('teachers')} style={{ flex: 1 }}>
-              🏷️ Teachers ({teachers.length})
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('series')} style={{ flex: 1 }}>
-              📖 Series
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('supplies')} style={{ flex: 1 }}>
-              🧺 Supplies
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={handleDownloadClassesTemplate} style={{ flex: 1 }}>
-              📝 Classes Template
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => classFileInputRef.current?.click()} disabled={importingClasses} style={{ flex: 1 }}>
-              {importingClasses ? 'Importing…' : '⬆ Upload Classes'}
-            </button>
+            <ActionsMenu open={leftMenuOpen} setOpen={setLeftMenuOpen} items={[
+              { label: '🗂️ Templates', onClick: () => setView('templates') },
+              { label: '📊 Reports (for One Board)', onClick: () => setView('reports') },
+              { divider: true },
+              { label: `🏷️ Teachers (${teachers.length})`, onClick: () => setView('teachers') },
+              { label: '📖 Series', onClick: () => setView('series') },
+              { label: '🧺 Supplies', onClick: () => setView('supplies') },
+              { divider: true },
+              { label: '📝 Download Classes Template', onClick: handleDownloadClassesTemplate },
+              { label: importingClasses ? 'Importing…' : '⬆ Upload Classes', onClick: () => classFileInputRef.current?.click(), disabled: importingClasses },
+            ]} />
             <input ref={classFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportClassesTemplate} />
           </div>
           {classImportResult && (
@@ -1993,8 +2052,12 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           })}
         </div>
       </div>
+      )}
 
       {/* Middle panel — sessions for selected class */}
+      {middleCollapsed ? (
+        <CollapsedPanelStrip label="Sessions" onExpand={() => setMiddleCollapsed(false)} />
+      ) : (
       <div style={{ width: '340px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--gray-100)', background: 'white' }}>
         {!selectedClass ? (
           <div className="empty-state" style={{ marginTop: '80px' }}>
@@ -2004,9 +2067,15 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
         ) : (
           <>
             <div style={{ padding: '20px', borderBottom: '1px solid var(--gray-100)' }}>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', color: 'var(--burgundy)', marginBottom: '4px' }}>
-                {selectedClass.name}
-              </h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', color: 'var(--burgundy)', marginBottom: '4px' }}>
+                  {selectedClass.name}
+                </h2>
+                <button onClick={() => setMiddleCollapsed(true)} title="Collapse panel"
+                  style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '14px', padding: '4px' }}>
+                  ◀
+                </button>
+              </div>
               {selectedClass.leader_name && (
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>Led by {selectedClass.leader_name}</div>
               )}
@@ -2030,29 +2099,20 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkAddSessions(true)} style={{ flex: 1 }}>
                   📅 Bulk Add
                 </button>
-              </div>
-              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsCsv} disabled={sessions.length === 0} style={{ flex: 1 }}>
-                  ⬇ CSV
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsExcel} disabled={sessions.length === 0} style={{ flex: 1 }}>
-                  📊 Excel
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={handleDownloadSessionsTemplate} disabled={sessions.length === 0} style={{ flex: 1 }}>
-                  📝 Template
-                </button>
-              </div>
-              <div style={{ marginTop: '6px' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={importingTemplate} style={{ width: '100%' }}>
-                  {importingTemplate ? 'Importing…' : '⬆ Upload Filled Template'}
-                </button>
+                <ActionsMenu open={middleMenuOpen} setOpen={setMiddleMenuOpen} items={[
+                  { label: '⬇ Export CSV', onClick: handleExportSessionsCsv, disabled: sessions.length === 0 },
+                  { label: '📊 Export Excel', onClick: handleExportSessionsExcel, disabled: sessions.length === 0 },
+                  { label: '📝 Download Template', onClick: handleDownloadSessionsTemplate, disabled: sessions.length === 0 },
+                  { divider: true },
+                  { label: importingTemplate ? 'Importing…' : '⬆ Upload Filled Template', onClick: () => fileInputRef.current?.click(), disabled: importingTemplate },
+                ]} />
                 <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportSessionsTemplate} />
-                {importResult && (
-                  <div style={{ fontSize: '11px', color: importResult.error ? 'var(--danger)' : 'var(--gray-400)', marginTop: '6px' }}>
-                    {importResult.error || `Updated ${importResult.updated} session(s)${importResult.skipped?.length ? `, ${importResult.skipped.length} date(s) not found` : ''}.`}
-                  </div>
-                )}
               </div>
+              {importResult && (
+                <div style={{ fontSize: '11px', color: importResult.error ? 'var(--danger)' : 'var(--gray-400)', marginTop: '6px' }}>
+                  {importResult.error || `Updated ${importResult.updated} session(s)${importResult.skipped?.length ? `, ${importResult.skipped.length} date(s) not found` : ''}.`}
+                </div>
+              )}
               {showAddSession && (
                 <form onSubmit={handleAddSession} style={{ marginTop: '10px', background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px' }}>
                   <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Date</label>
@@ -2125,6 +2185,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           </>
         )}
       </div>
+      )}
 
       {/* Right panel — session detail + attendance */}
       <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
