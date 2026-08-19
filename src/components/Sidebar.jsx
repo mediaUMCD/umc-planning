@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
 
 const NAV_ITEMS = [
@@ -26,6 +27,12 @@ const OTHER_APPS = [
 ]
 
 export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising }) {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Close the menu automatically after navigating — this app uses internal
+  // page state rather than URL routing, so we watch `page` instead of a route.
+  useEffect(() => { setMobileOpen(false) }, [page])
+
   async function handleLogout() {
     await supabase.auth.signOut()
   }
@@ -35,8 +42,20 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
     : canFundraising ? [...NAV_ITEMS, FUNDRAISING_ITEM] : NAV_ITEMS
 
   return (
-    <div className="sidebar">
-      {/* Logo */}
+    <>
+      <div className="mobile-topbar no-print">
+        <button className="mobile-menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
+          <span /><span /><span />
+        </button>
+        <img src="/icons/icon-service-planner.png" alt="" style={{ width: 22, height: 22 }} />
+        <span className="mobile-topbar-title">UMCD {isFinanceOnly ? 'Finance' : 'Planning Hub'}</span>
+      </div>
+
+      {mobileOpen && <div className="sidebar-backdrop no-print" onClick={() => setMobileOpen(false)} />}
+
+      <div className={`sidebar no-print${mobileOpen ? ' sidebar-open' : ''}`}>
+        <button className="sidebar-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu">✕</button>
+        {/* Logo */}
       <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <img src="/icons/icon-service-planner.png" alt="" style={{ width: '32px', height: '32px', marginBottom: '6px' }} />
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'white', lineHeight: 1.3 }}>
@@ -115,6 +134,7 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
           Sign out →
         </button>
       </div>
-    </div>
+      </div>
+    </>
   )
 }
