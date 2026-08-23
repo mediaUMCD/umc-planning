@@ -35,8 +35,6 @@ const FIELD_TYPES = [
   { value: 'select', label: 'Dropdown' },
   { value: 'date', label: 'Date' },
   { value: 'person', label: 'Person (Teacher lookup)' },
-  { value: 'people', label: 'Multiple People (Teacher lookup)' },
-  { value: 'supplies_checklist', label: 'Supplies Checklist' },
 ]
 
 function typeMeta(value) {
@@ -59,8 +57,6 @@ function personLabel(p) {
 
 const CE_TAG_NAME = 'Christian Ed'
 
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
 const STATUS_OPTIONS = [
   { value: 'planned', label: 'Planned' },
   { value: 'confirmed', label: 'Confirmed' },
@@ -68,71 +64,7 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-// Small reusable "More actions" dropdown — used to keep panel headers from
-// turning into walls of buttons. Closes itself after any item is clicked.
-function ActionsMenu({ label = '⋮ More', open, setOpen, items }) {
-  return (
-    <div style={{ position: 'relative', flex: 1 }}>
-      <button className="btn btn-secondary btn-sm" onClick={() => setOpen(o => !o)} style={{ width: '100%' }}>
-        {label} {open ? '▲' : '▼'}
-      </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
-          <div style={{
-            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 11,
-            background: 'white', border: '1px solid var(--gray-100)', borderRadius: '8px',
-            boxShadow: '0 4px 16px rgba(61,0,38,0.15)', overflow: 'hidden', minWidth: '200px',
-          }}>
-            {items.map((item, i) => item.divider ? (
-              <div key={i} style={{ borderTop: '1px solid var(--gray-100)', margin: '4px 0' }} />
-            ) : (
-              <button
-                key={i}
-                onClick={() => { setOpen(false); item.onClick?.() }}
-                disabled={item.disabled}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
-                  fontSize: '13px', background: 'none', border: 'none', cursor: item.disabled ? 'default' : 'pointer',
-                  color: item.disabled ? 'var(--gray-200)' : 'var(--gray-800)',
-                }}
-                onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = 'var(--gray-50)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// Thin collapsed-state strip shown in place of a full panel — click to expand.
-function CollapsedPanelStrip({ label, onExpand }) {
-  return (
-    <div
-      onClick={onExpand}
-      style={{
-        width: '36px', flexShrink: 0, borderRight: '1px solid var(--gray-100)', background: 'white',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '16px', gap: '10px',
-        cursor: 'pointer',
-      }}
-      title={`Show ${label}`}
-    >
-      <span style={{ fontSize: '13px', color: 'var(--burgundy)' }}>▶</span>
-      <span style={{
-        writingMode: 'vertical-rl', fontSize: '11px', fontWeight: 700, color: 'var(--gray-400)',
-        letterSpacing: '0.05em', textTransform: 'uppercase',
-      }}>
-        {label}
-      </span>
-    </div>
-  )
-}
-
-export default function ChristianEducation({ initialTarget, onConsumeTarget } = {}) {
+export default function ChristianEducation() {
   const [view, setView] = useState('sessions') // 'sessions' | 'templates'
 
   const [classes, setClasses] = useState([])
@@ -142,47 +74,22 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
   const [sessions, setSessions] = useState([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
-  const [sessionCategoryFilter, setSessionCategoryFilter] = useState('all')
   const [selectedSession, setSelectedSession] = useState(null)
 
   const [templates, setTemplates] = useState([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [teachers, setTeachers] = useState([])
-  const [supplies, setSupplies] = useState([])
-  const [loadingSupplies, setLoadingSupplies] = useState(true)
-  const [newSupplyName, setNewSupplyName] = useState('')
-  const [addingSupply, setAddingSupply] = useState(false)
 
   // Add Class form
   const [showAddClass, setShowAddClass] = useState(false)
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [middleCollapsed, setMiddleCollapsed] = useState(false)
-  const [leftMenuOpen, setLeftMenuOpen] = useState(false)
-  const [middleMenuOpen, setMiddleMenuOpen] = useState(false)
   const [newClassType, setNewClassType] = useState('adult_sunday_school')
   const [newClassName, setNewClassName] = useState('')
   const [newMeetingDay, setNewMeetingDay] = useState('')
   const [newMeetingTime, setNewMeetingTime] = useState('')
   const [newLocation, setNewLocation] = useState('')
   const [newLeader, setNewLeader] = useState('')
-  const [newDefaultTemplateId, setNewDefaultTemplateId] = useState('')
   const [addingClass, setAddingClass] = useState(false)
   const [addClassError, setAddClassError] = useState(null)
-  const [editingClassId, setEditingClassId] = useState(null)
-  const [importingClasses, setImportingClasses] = useState(false)
-  const [classImportResult, setClassImportResult] = useState(null)
-  const classFileInputRef = useRef(null)
-
-  // Reports (One Board)
-  const today = new Date()
-  const [reportStart, setReportStart] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10))
-  const [reportEnd, setReportEnd] = useState(new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10))
-  const [reportClassFilter, setReportClassFilter] = useState('all')
-  const [reportRecap, setReportRecap] = useState('')
-  const [reportRows, setReportRows] = useState([])
-  const [reportLoading, setReportLoading] = useState(false)
-  const [reportError, setReportError] = useState(null)
-  const [reportRun, setReportRun] = useState(false)
 
   // Add Session form
   const [showAddSession, setShowAddSession] = useState(false)
@@ -210,7 +117,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
   // Attendance / push
   const [headcount, setHeadcount] = useState('')
-  const [guestCount, setGuestCount] = useState('')
   const [savingHeadcount, setSavingHeadcount] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [pushError, setPushError] = useState(null)
@@ -268,33 +174,9 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const [newSeriesDates, setNewSeriesDates] = useState([{ date: '', title: '', info: '' }])
   const [savingSeries, setSavingSeries] = useState(false)
   const [seriesError, setSeriesError] = useState(null)
+  const [seriesInfo, setSeriesInfo] = useState(null)
 
-  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries(); loadSupplies() }, [])
-
-  // Deep-link support from the Dashboard: jump straight to a specific
-  // session, class, or series instead of landing on the default list.
-  useEffect(() => {
-    if (!initialTarget || loadingClasses || loadingSeries) return
-    if (initialTarget.seriesId) {
-      setView('series')
-      setExpandedSeriesId(initialTarget.seriesId)
-      onConsumeTarget?.()
-    } else if (initialTarget.classId) {
-      const cls = classes.find(c => c.id === initialTarget.classId)
-      if (cls) {
-        setView('sessions')
-        selectClass(cls).then(() => {
-          if (initialTarget.sessionId) {
-            // selectClass loads sessions asynchronously; grab the fresh list
-            // straight from Supabase rather than relying on stale closure state.
-            supabase.from('ce_sessions').select('*').eq('id', initialTarget.sessionId).maybeSingle()
-              .then(({ data }) => { if (data) selectSession(data) })
-          }
-        })
-      }
-      onConsumeTarget?.()
-    }
-  }, [initialTarget, loadingClasses, loadingSeries, classes])
+  useEffect(() => { loadClasses(); loadTemplates(); loadTeachers(); loadSeries() }, [])
 
   async function loadClasses() {
     setLoadingClasses(true)
@@ -329,31 +211,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       .select('people(*)')
       .eq('tag_id', tagId)
     setTeachers((data || []).map(row => row.people).filter(Boolean).sort((a, b) => (a.last_name || '').localeCompare(b.last_name || '')))
-  }
-
-  async function loadSupplies() {
-    setLoadingSupplies(true)
-    const { data } = await supabase.from('ce_supplies').select('*').eq('is_active', true).order('sort_order', { ascending: true }).order('name', { ascending: true })
-    setSupplies(data || [])
-    setLoadingSupplies(false)
-  }
-
-  async function handleAddSupply(e) {
-    e.preventDefault()
-    if (!newSupplyName.trim()) return
-    setAddingSupply(true)
-    const { data, error } = await supabase.from('ce_supplies').insert([{ name: newSupplyName.trim() }]).select().single()
-    if (!error) {
-      setSupplies(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
-      setNewSupplyName('')
-    }
-    setAddingSupply(false)
-  }
-
-  async function handleDeleteSupply(supplyId) {
-    if (!confirm('Remove this supply from the list? It stays on any sessions that already checked it, but disappears from the checklist for future ones.')) return
-    await supabase.from('ce_supplies').update({ is_active: false }).eq('id', supplyId)
-    setSupplies(prev => prev.filter(s => s.id !== supplyId))
   }
 
   async function loadSeries() {
@@ -398,24 +255,64 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
         .single()
       if (seriesErr) throw seriesErr
 
-      const sessionsToInsert = validDates.map(r => ({
-        class_id: newSeriesClassId,
-        series_id: series.id,
-        session_date: r.date,
-        topic: r.title || null,
-        curriculum_notes: r.info || null,
-        category: newSeriesCategory,
-        template_id: newSeriesTemplateId || null,
-      }))
-      const { error: sessionsErr } = await supabase.from('ce_sessions').insert(sessionsToInsert)
-      if (sessionsErr) throw sessionsErr
+      // Check for sessions this class already has on these dates, so a
+      // series never creates a second session on a date that's already
+      // planned — it links the existing one to the series instead.
+      const dates = validDates.map(r => r.date)
+      const { data: existingOnDates } = await supabase
+        .from('ce_sessions')
+        .select('id, session_date, topic, curriculum_notes')
+        .eq('class_id', newSeriesClassId)
+        .in('session_date', dates)
+      const existingByDate = {}
+      for (const s of (existingOnDates || [])) existingByDate[s.session_date] = s
 
+      const toInsert = []
+      const toUpdate = []
+      for (const r of validDates) {
+        const existing = existingByDate[r.date]
+        if (existing) {
+          toUpdate.push({
+            id: existing.id,
+            series_id: series.id,
+            // Don't clobber content that's already there — only fill in blanks.
+            ...(!existing.topic && r.title ? { topic: r.title } : {}),
+            ...(!existing.curriculum_notes && r.info ? { curriculum_notes: r.info } : {}),
+          })
+        } else {
+          toInsert.push({
+            class_id: newSeriesClassId,
+            series_id: series.id,
+            session_date: r.date,
+            topic: r.title || null,
+            curriculum_notes: r.info || null,
+            category: newSeriesCategory,
+            template_id: newSeriesTemplateId || null,
+          })
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const { error: sessionsErr } = await supabase.from('ce_sessions').insert(toInsert)
+        if (sessionsErr) throw sessionsErr
+      }
+      for (const u of toUpdate) {
+        const { id, ...patch } = u
+        await supabase.from('ce_sessions').update(patch).eq('id', id)
+      }
+
+      setSavingSeries(false)
+      setSeriesInfo(null)
+      if (toUpdate.length > 0) {
+        setSeriesInfo(`Note: ${toUpdate.length} date(s) already had a session for this class — linked those to the series instead of creating duplicates.`)
+      }
       setNewSeriesClassId(''); setNewSeriesName(''); setNewSeriesDescription('')
       setNewSeriesCategory('lesson'); setNewSeriesTemplateId('')
       setNewSeriesDates([{ date: '', title: '', info: '' }])
       setShowNewSeries(false)
       loadSeries()
       if (selectedClass?.id === newSeriesClassId) selectClass(selectedClass)
+      return
     } catch (err) {
       setSeriesError(err.message)
     }
@@ -485,167 +382,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       setAddPersonError(err.message)
     }
     setAddingPerson(false)
-  }
-
-  function handleDownloadClassesTemplate() {
-    const rows = classes.map(c => ({
-      'Class Type': typeMeta(c.class_type).label,
-      'Class Name': c.name || '',
-      'Meeting Day': c.meeting_day || '',
-      'Meeting Time': c.meeting_time || '',
-      'Location': c.location || '',
-      'Leader / Teacher Name': c.leader_name || '',
-      'Default Template (optional)': templates.find(t => t.id === c.default_template_id)?.name || '',
-    }))
-    for (let i = 0; i < 5; i++) rows.push({
-      'Class Type': '', 'Class Name': '', 'Meeting Day': '', 'Meeting Time': '',
-      'Location': '', 'Leader / Teacher Name': '', 'Default Template (optional)': '',
-    })
-    const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 22 }, { wch: 24 }]
-    const typeSheet = XLSX.utils.aoa_to_sheet([
-      ['Valid Class Types'],
-      ...CLASS_TYPES.map(t => [t.label]),
-    ])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Classes')
-    XLSX.utils.book_append_sheet(wb, typeSheet, 'Reference')
-    XLSX.writeFile(wb, `ce-classes-template-${new Date().toISOString().slice(0, 10)}.xlsx`)
-  }
-
-  async function handleImportClassesTemplate(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImportingClasses(true)
-    setClassImportResult(null)
-    try {
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array' })
-      const sheet = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-
-      let added = 0, updated = 0
-      const skipped = []
-      for (const row of rows) {
-        const name = (row['Class Name'] || '').toString().trim()
-        if (!name) continue // blank template row
-
-        const typeLabel = (row['Class Type'] || '').toString().trim()
-        const typeMatch = CLASS_TYPES.find(t => t.label.toLowerCase() === typeLabel.toLowerCase())
-        if (!typeMatch) { skipped.push(`${name} (unrecognized Class Type "${typeLabel}")`); continue }
-
-        const meetingDayRaw = (row['Meeting Day'] || '').toString().trim()
-        const meetingDay = WEEKDAYS.find(w => w.toLowerCase() === meetingDayRaw.toLowerCase()) || null
-        if (meetingDayRaw && !meetingDay) { skipped.push(`${name} (unrecognized Meeting Day "${meetingDayRaw}")`); continue }
-
-        const templateName = (row['Default Template (optional)'] || '').toString().trim()
-        let defaultTemplateId = null
-        if (templateName) {
-          const tMatch = templates.find(t => t.name.toLowerCase() === templateName.toLowerCase())
-          if (!tMatch) { skipped.push(`${name} (unrecognized template "${templateName}")`); continue }
-          defaultTemplateId = tMatch.id
-        }
-
-        const patch = {
-          class_type: typeMatch.value,
-          name,
-          meeting_day: meetingDay,
-          meeting_time: (row['Meeting Time'] || '').toString().trim() || null,
-          location: (row['Location'] || '').toString().trim() || null,
-          leader_name: (row['Leader / Teacher Name'] || '').toString().trim() || null,
-          default_template_id: defaultTemplateId,
-        }
-
-        const existingMatch = classes.find(c => c.name.toLowerCase() === name.toLowerCase())
-        if (existingMatch) {
-          const { error } = await supabase.from('ce_classes').update(patch).eq('id', existingMatch.id)
-          if (error) { skipped.push(`${name} (${error.message})`); continue }
-          updated++
-        } else {
-          const { error } = await supabase.from('ce_classes').insert([patch])
-          if (error) { skipped.push(`${name} (${error.message})`); continue }
-          added++
-        }
-      }
-      setClassImportResult({ added, updated, skipped })
-      await loadClasses()
-    } catch (err) {
-      setClassImportResult({ error: err.message })
-    }
-    setImportingClasses(false)
-    e.target.value = ''
-  }
-
-  async function handleRunReport() {
-    setReportLoading(true)
-    setReportError(null)
-    setReportRun(true)
-    try {
-      let query = supabase
-        .from('ce_sessions')
-        .select('id, session_date, topic, status, class_id')
-        .gte('session_date', reportStart)
-        .lte('session_date', reportEnd)
-        .order('session_date', { ascending: true })
-      if (reportClassFilter !== 'all') query = query.eq('class_id', reportClassFilter)
-      const { data: sessionRows, error } = await query
-      if (error) throw error
-
-      const dates = [...new Set((sessionRows || []).map(s => s.session_date))]
-      let specialByDate = {}
-      if (dates.length) {
-        const { data: sd } = await supabase
-          .from('service_dates')
-          .select('service_date, special_designation')
-          .in('service_date', dates)
-        specialByDate = Object.fromEntries((sd || []).map(d => [d.service_date, d.special_designation]))
-      }
-
-      const rows = (sessionRows || []).map(s => {
-        const cls = classes.find(c => c.id === s.class_id)
-        return {
-          date: s.session_date,
-          className: cls?.name || '(unknown class)',
-          classType: typeMeta(cls?.class_type).label,
-          teacher: cls?.leader_name || '',
-          specialDay: specialByDate[s.session_date] || '',
-          title: s.topic || '',
-          status: s.status || '',
-        }
-      })
-      setReportRows(rows)
-    } catch (err) {
-      setReportError(err.message)
-      setReportRows([])
-    }
-    setReportLoading(false)
-  }
-
-  function handleExportReport() {
-    const rows = reportRows.map(r => ({
-      'Date': r.date,
-      'Class': r.className,
-      'Class Type': r.classType,
-      'Special Sunday': r.specialDay,
-      'Teacher': r.teacher,
-      'Title / Plan': r.title,
-      'Status': r.status,
-    }))
-    const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 32 }, { wch: 12 }]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'CE Class Plan')
-
-    if (reportRecap.trim()) {
-      const recapWs = XLSX.utils.aoa_to_sheet([
-        ['Previous Period Recap'],
-        [reportRecap.trim()],
-      ])
-      recapWs['!cols'] = [{ wch: 100 }]
-      XLSX.utils.book_append_sheet(wb, recapWs, 'Recap')
-    }
-
-    XLSX.writeFile(wb, `ce-class-plan-${reportStart}-to-${reportEnd}.xlsx`)
   }
 
   function handleDownloadTeachersTemplate() {
@@ -726,12 +462,11 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setSelectedSession(null)
     setPushError(null)
     setSessionsLoading(true)
-    setSessionCategoryFilter('all')
     const { data } = await supabase
       .from('ce_sessions')
       .select('*')
       .eq('class_id', cls.id)
-      .order('session_date', { ascending: true })
+      .order('session_date', { ascending: false })
     setSessions(data || [])
     setSessionsLoading(false)
   }
@@ -743,7 +478,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setMaterialsNeeded(session.materials_needed || '')
     setStatus(session.status || 'planned')
     setHeadcount(session.headcount ?? '')
-    setGuestCount(session.guest_count ?? '')
     setFieldValues(session.field_values || {})
     setSessionError(null)
     setFieldsError(null)
@@ -834,99 +568,18 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           meeting_time: newMeetingTime || null,
           location: newLocation || null,
           leader_name: newLeader || null,
-          default_template_id: newDefaultTemplateId || null,
         }])
         .select()
         .single()
       if (error) throw error
       setClasses(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       setNewClassType('adult_sunday_school'); setNewClassName(''); setNewMeetingDay('')
-      setNewMeetingTime(''); setNewLocation(''); setNewLeader(''); setNewDefaultTemplateId('')
+      setNewMeetingTime(''); setNewLocation(''); setNewLeader('')
       setShowAddClass(false)
     } catch (err) {
       setAddClassError(err.message)
     }
     setAddingClass(false)
-  }
-
-  function startEditClass(cls) {
-    setEditingClassId(cls.id)
-    setNewClassType(cls.class_type)
-    setNewClassName(cls.name)
-    setNewMeetingDay(cls.meeting_day || '')
-    setNewMeetingTime(cls.meeting_time || '')
-    setNewLocation(cls.location || '')
-    setNewLeader(cls.leader_name || '')
-    setNewDefaultTemplateId(cls.default_template_id || '')
-    setShowAddClass(true)
-    setAddClassError(null)
-  }
-
-  function cancelEditClass() {
-    setEditingClassId(null)
-    setNewClassType('adult_sunday_school'); setNewClassName(''); setNewMeetingDay('')
-    setNewMeetingTime(''); setNewLocation(''); setNewLeader(''); setNewDefaultTemplateId('')
-    setShowAddClass(false)
-    setAddClassError(null)
-  }
-
-  async function handleSaveClass(e) {
-    e.preventDefault()
-    if (editingClassId) {
-      setAddingClass(true)
-      setAddClassError(null)
-      try {
-        const patch = {
-          class_type: newClassType,
-          name: newClassName,
-          meeting_day: newMeetingDay || null,
-          meeting_time: newMeetingTime || null,
-          location: newLocation || null,
-          leader_name: newLeader || null,
-          default_template_id: newDefaultTemplateId || null,
-        }
-        const { data, error } = await supabase.from('ce_classes').update(patch).eq('id', editingClassId).select().single()
-        if (error) throw error
-        setClasses(prev => prev.map(c => c.id === editingClassId ? data : c).sort((a, b) => a.name.localeCompare(b.name)))
-        if (selectedClass?.id === editingClassId) setSelectedClass(data)
-        cancelEditClass()
-      } catch (err) {
-        setAddClassError(err.message)
-      }
-      setAddingClass(false)
-    } else {
-      await handleAddClass(e)
-    }
-  }
-
-  async function handleDeleteClass(cls) {
-    const { count } = await supabase.from('ce_sessions').select('id', { count: 'exact', head: true }).eq('class_id', cls.id)
-    const sessionWarning = count > 0 ? ` This will also delete its ${count} session${count === 1 ? '' : 's'}.` : ''
-    if (!confirm(`Delete "${cls.name}"?${sessionWarning} This cannot be undone.`)) return
-    try {
-      if (count > 0) {
-        const { error: sessErr } = await supabase.from('ce_sessions').delete().eq('class_id', cls.id)
-        if (sessErr) throw sessErr
-      }
-      const { error } = await supabase.from('ce_classes').delete().eq('id', cls.id)
-      if (error) throw error
-      setClasses(prev => prev.filter(c => c.id !== cls.id))
-      if (selectedClass?.id === cls.id) { setSelectedClass(null); setSessions([]); setSelectedSession(null) }
-    } catch (err) {
-      alert('Could not delete class: ' + err.message)
-    }
-  }
-
-  async function handleDeleteSession(session) {
-    if (!confirm(`Delete this session (${formatDate(session.session_date)})? This cannot be undone.`)) return
-    try {
-      const { error } = await supabase.from('ce_sessions').delete().eq('id', session.id)
-      if (error) throw error
-      setSessions(prev => prev.filter(s => s.id !== session.id))
-      if (selectedSession?.id === session.id) setSelectedSession(null)
-    } catch (err) {
-      alert('Could not delete session: ' + err.message)
-    }
   }
 
   async function handleAddSession(e) {
@@ -1185,12 +838,11 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setSavingHeadcount(true)
     setSessionError(null)
     const val = headcount === '' ? null : parseInt(headcount)
-    const guestVal = guestCount === '' ? null : parseInt(guestCount)
-    const { error } = await supabase.from('ce_sessions').update({ headcount: val, guest_count: guestVal }).eq('id', selectedSession.id)
+    const { error } = await supabase.from('ce_sessions').update({ headcount: val }).eq('id', selectedSession.id)
     if (error) {
       setSessionError(`Couldn't save headcount: ${error.message}`)
     } else {
-      const merged = { ...selectedSession, headcount: val, guest_count: guestVal }
+      const merged = { ...selectedSession, headcount: val }
       setSelectedSession(merged)
       setSessions(prev => prev.map(s => s.id === merged.id ? merged : s))
     }
@@ -1202,7 +854,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setPushing(true)
     setPushError(null)
     const val = headcount === '' ? null : parseInt(headcount)
-    const guestVal = guestCount === '' ? null : parseInt(guestCount)
     if (val === null) {
       setPushError('Enter a headcount before pushing to the Attendance Tracker.')
       setPushing(false)
@@ -1215,7 +866,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
       if (attendanceEventId) {
         const { error } = await supabase
           .from('attendance_events')
-          .update({ headcount: val, guest_count: guestVal, event_name: `${selectedClass.name}${topic ? ' — ' + topic : ''}` })
+          .update({ headcount: val, event_name: `${selectedClass.name}${topic ? ' — ' + topic : ''}` })
           .eq('id', attendanceEventId)
         if (error) throw error
       } else {
@@ -1227,7 +878,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
             event_type: eventType,
             source_app: 'ce_planning',
             headcount: val,
-            guest_count: guestVal,
           }])
           .select()
           .single()
@@ -1237,7 +887,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
 
       const updates = {
         headcount: val,
-        guest_count: guestVal,
         attendance_pushed: true,
         attendance_pushed_at: new Date().toISOString(),
         attendance_event_id: attendanceEventId,
@@ -1289,16 +938,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
     setTemplateFields(prev => prev.filter((_, i) => i !== idx))
   }
 
-  function moveTemplateField(idx, direction) {
-    setTemplateFields(prev => {
-      const next = [...prev]
-      const target = idx + direction
-      if (target < 0 || target >= next.length) return prev
-      ;[next[idx], next[target]] = [next[target], next[idx]]
-      return next
-    })
-  }
-
   async function handleSaveTemplate(e) {
     e.preventDefault()
     setSavingTemplate(true)
@@ -1344,7 +983,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   const filteredClasses = classes.filter(c => filterType === 'all' ? true : c.class_type === filterType)
-  const filteredSessions = sessions.filter(s => sessionCategoryFilter === 'all' ? true : s.category === sessionCategoryFilter)
 
   // ---- Dynamic field renderer ----
   function renderFieldInput(field) {
@@ -1371,49 +1009,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           <option value="">— Select —</option>
           {teachers.map(p => <option key={p.id} value={p.id}>{personLabel(p)}</option>)}
         </select>
-      )
-    }
-    if (field.type === 'people') {
-      const selected = Array.isArray(val) ? val : []
-      const toggle = (personId) => {
-        set(selected.includes(personId) ? selected.filter(id => id !== personId) : [...selected, personId])
-      }
-      return (
-        <div style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', maxHeight: '160px', overflowY: 'auto' }}>
-          {teachers.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>No teachers tagged yet — add some under the Teachers tab.</div>
-          ) : teachers.map(p => (
-            <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '3px 0', cursor: 'pointer' }}>
-              <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} />
-              {personLabel(p)}
-            </label>
-          ))}
-        </div>
-      )
-    }
-    if (field.type === 'supplies_checklist') {
-      const current = (val && typeof val === 'object' && !Array.isArray(val)) ? val : { checked: [], additional: '' }
-      const checked = current.checked || []
-      const toggle = (supplyId) => {
-        set({ ...current, checked: checked.includes(supplyId) ? checked.filter(id => id !== supplyId) : [...checked, supplyId] })
-      }
-      return (
-        <div>
-          <div style={{ border: '1px solid var(--gray-100)', borderRadius: '6px', padding: '8px', maxHeight: '160px', overflowY: 'auto', marginBottom: '6px' }}>
-            {supplies.length === 0 ? (
-              <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>No supplies in the list yet — add some under the Supplies tab.</div>
-            ) : supplies.map(s => (
-              <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '3px 0', cursor: 'pointer' }}>
-                <input type="checkbox" checked={checked.includes(s.id)} onChange={() => toggle(s.id)} />
-                {s.name}
-              </label>
-            ))}
-          </div>
-          <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Additional Supplies</label>
-          <input type="text" value={current.additional || ''} onChange={e => set({ ...current, additional: e.target.value })}
-            placeholder="Anything not on the list above"
-            style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
-        </div>
       )
     }
     return <input type="text" value={val} onChange={e => set(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
@@ -1460,12 +1055,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
                   {templateFields.map((f, idx) => (
                     <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', background: 'var(--gray-50)', padding: '8px', borderRadius: '6px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', flexShrink: 0 }}>
-                        <button type="button" onClick={() => moveTemplateField(idx, -1)} disabled={idx === 0} title="Move up"
-                          style={{ fontSize: '11px', lineHeight: 1, padding: '2px 4px', background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--gray-200)' : 'var(--burgundy)' }}>▲</button>
-                        <button type="button" onClick={() => moveTemplateField(idx, 1)} disabled={idx === templateFields.length - 1} title="Move down"
-                          style={{ fontSize: '11px', lineHeight: 1, padding: '2px 4px', background: 'none', border: 'none', cursor: idx === templateFields.length - 1 ? 'default' : 'pointer', color: idx === templateFields.length - 1 ? 'var(--gray-200)' : 'var(--burgundy)' }}>▼</button>
-                      </div>
                       <input type="text" value={f.label} onChange={e => updateTemplateField(idx, { label: e.target.value })} placeholder="Field label (e.g. Scripture)"
                         style={{ flex: 2, padding: '6px 8px', fontSize: '12px' }} />
                       <select value={f.type} onChange={e => updateTemplateField(idx, { type: e.target.value })} style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }}>
@@ -1740,6 +1329,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
               <button type="button" className="btn btn-secondary btn-sm" onClick={addSeriesDateRow} style={{ marginBottom: '14px' }}>+ Add Date</button>
 
               {seriesError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '10px' }}>{seriesError}</div>}
+              {seriesInfo && <div style={{ fontSize: '12px', color: 'var(--gray-600)', background: 'var(--gray-50)', padding: '8px 10px', borderRadius: '6px', marginBottom: '10px' }}>{seriesInfo}</div>}
               <button type="submit" className="btn btn-primary btn-sm" disabled={savingSeries || !newSeriesClassId || !newSeriesName}>
                 {savingSeries ? 'Creating…' : 'Create Series'}
               </button>
@@ -1781,215 +1371,53 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           })}
         </div>
       </div>
-      ) : view === 'supplies' ? (
-
-      /* ============ SUPPLIES VIEW ============ */
-      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
-        <div style={{ padding: '24px', maxWidth: '520px', margin: '0 auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <div>
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)' }}>Supplies</h1>
-              <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
-                Manage the master list used by any "Supplies Checklist" field on session templates.
-              </div>
-            </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
-          </div>
-
-          <form onSubmit={handleAddSupply} className="card" style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
-            <input type="text" value={newSupplyName} onChange={e => setNewSupplyName(e.target.value)} placeholder="e.g. Glue sticks, Construction paper"
-              style={{ flex: 1, padding: '8px 10px', fontSize: '13px' }} />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={addingSupply || !newSupplyName.trim()}>
-              {addingSupply ? 'Adding…' : '+ Add'}
-            </button>
-          </form>
-
-          {loadingSupplies ? <div className="spinner" /> : supplies.length === 0 ? (
-            <div className="empty-state"><div className="icon">🧺</div><p>No supplies added yet.</p></div>
-          ) : (
-            <div className="card">
-              {supplies.map(s => (
-                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                  <span style={{ fontSize: '14px', color: 'var(--gray-800)' }}>{s.name}</span>
-                  <button onClick={() => handleDeleteSupply(s.id)} style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer' }}>
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      ) : view === 'reports' ? (
-
-      /* ============ REPORTS VIEW (One Board) ============ */
-      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
-        <div style={{ padding: '24px', maxWidth: '920px', margin: '0 auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <div>
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--burgundy)' }}>Reports — One Board</h1>
-              <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
-                Pull the CE class plan for a date range and export it for the board report.
-              </div>
-            </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => setView('sessions')}>← Back to Classes</button>
-          </div>
-
-          <div className="card" style={{ marginBottom: '20px' }}>
-            <div className="grid-2" style={{ marginBottom: '10px' }}>
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Start Date</label>
-                <input type="date" value={reportStart} onChange={e => setReportStart(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>End Date</label>
-                <input type="date" value={reportEnd} onChange={e => setReportEnd(e.target.value)}
-                  style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }} />
-              </div>
-            </div>
-            <div style={{ marginBottom: '10px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Class</label>
-              <select value={reportClassFilter} onChange={e => setReportClassFilter(e.target.value)}
-                style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}>
-                <option value="all">All classes</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom: '10px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>
-                Previous Period Recap (optional — pasted in, included on its own tab in the export)
-              </label>
-              <textarea value={reportRecap} onChange={e => setReportRecap(e.target.value)} rows={4}
-                placeholder="Paste a summary of the prior period here if you have one…"
-                style={{ width: '100%', padding: '8px', fontSize: '13px', fontFamily: 'inherit' }} />
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={handleRunReport} disabled={reportLoading}>
-              {reportLoading ? 'Loading…' : 'Generate Report'}
-            </button>
-            {reportError && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '8px' }}>{reportError}</div>}
-          </div>
-
-          {reportRun && !reportLoading && (
-            reportRows.length === 0 ? (
-              <div className="empty-state"><div className="icon">📊</div><p>No sessions found in that range.</p></div>
-            ) : (
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <div style={{ fontSize: '13px', color: 'var(--gray-400)' }}>{reportRows.length} session{reportRows.length === 1 ? '' : 's'}</div>
-                  <button className="btn btn-secondary btn-sm" onClick={handleExportReport}>⬇ Export to Excel</button>
-                </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--gray-100)', textAlign: 'left' }}>
-                        <th style={{ padding: '6px' }}>Date</th>
-                        <th style={{ padding: '6px' }}>Class</th>
-                        <th style={{ padding: '6px' }}>Type</th>
-                        <th style={{ padding: '6px' }}>Special Sunday</th>
-                        <th style={{ padding: '6px' }}>Teacher</th>
-                        <th style={{ padding: '6px' }}>Title / Plan</th>
-                        <th style={{ padding: '6px' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportRows.map(r => (
-                        <tr key={r.date + r.className} style={{ borderBottom: '1px solid var(--gray-100)' }}>
-                          <td style={{ padding: '6px' }}>{new Date(r.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-                          <td style={{ padding: '6px' }}>{r.className}</td>
-                          <td style={{ padding: '6px' }}>{r.classType}</td>
-                          <td style={{ padding: '6px' }}>{r.specialDay}</td>
-                          <td style={{ padding: '6px' }}>{r.teacher}</td>
-                          <td style={{ padding: '6px' }}>{r.title}</td>
-                          <td style={{ padding: '6px' }}>{r.status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )
-          )}
-        </div>
-      </div>
       ) : (
       <>
       {/* ============ CLASSES / SESSIONS VIEW ============ */}
 
       {/* Left panel — class list */}
-      {leftCollapsed ? (
-        <CollapsedPanelStrip label="Classes" onExpand={() => setLeftCollapsed(false)} />
-      ) : (
       <div style={{ width: '380px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--gray-100)', background: 'white' }}>
         <div style={{ padding: '20px', borderBottom: '1px solid var(--gray-100)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '19px', color: 'var(--burgundy)' }}>Christian Education</h1>
-            <button onClick={() => setLeftCollapsed(true)} title="Collapse panel"
-              style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '14px', padding: '4px' }}>
-              ◀
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowAddClass(s => !s)} style={{ flex: 1 }}>
+              {showAddClass ? '✕ Cancel' : '+ Add Class'}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('templates')} style={{ flex: 1 }}>
+              🗂️ Templates
             </button>
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => showAddClass ? cancelEditClass() : setShowAddClass(true)} style={{ flex: 1 }}>
-              {showAddClass ? '✕ Cancel' : '+ Add Class'}
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('teachers')} style={{ flex: 1 }}>
+              🏷️ Teachers ({teachers.length})
             </button>
-            <ActionsMenu open={leftMenuOpen} setOpen={setLeftMenuOpen} items={[
-              { label: '🗂️ Templates', onClick: () => setView('templates') },
-              { label: '📊 Reports (for One Board)', onClick: () => setView('reports') },
-              { divider: true },
-              { label: `🏷️ Teachers (${teachers.length})`, onClick: () => setView('teachers') },
-              { label: '📖 Series', onClick: () => setView('series') },
-              { label: '🧺 Supplies', onClick: () => setView('supplies') },
-              { divider: true },
-              { label: '📝 Download Classes Template', onClick: handleDownloadClassesTemplate },
-              { label: importingClasses ? 'Importing…' : '⬆ Upload Classes', onClick: () => classFileInputRef.current?.click(), disabled: importingClasses },
-            ]} />
-            <input ref={classFileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportClassesTemplate} />
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('series')} style={{ flex: 1 }}>
+              📖 Series
+            </button>
           </div>
-          {classImportResult && (
-            <div style={{ fontSize: '11px', color: classImportResult.error ? 'var(--danger)' : 'var(--gray-400)', marginBottom: '12px' }}>
-              {classImportResult.error || `Added ${classImportResult.added}, updated ${classImportResult.updated}.${classImportResult.skipped?.length ? ` Skipped: ${classImportResult.skipped.join('; ')}` : ''}`}
-            </div>
-          )}
 
           {showAddClass && (
-            <form onSubmit={handleSaveClass} style={{ background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
-              {editingClassId && <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '6px' }}>Editing Class</div>}
+            <form onSubmit={handleAddClass} style={{ background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
               <select value={newClassType} onChange={e => setNewClassType(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                 {CLASS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
               <input type="text" value={newClassName} onChange={e => setNewClassName(e.target.value)} placeholder="Class name" required
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
               <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                <select value={newMeetingDay} onChange={e => setNewMeetingDay(e.target.value)}
-                  style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }}>
-                  <option value="">Meeting day</option>
-                  {WEEKDAYS.map(w => <option key={w} value={w}>{w}</option>)}
-                </select>
-                <input type="time" value={newMeetingTime} onChange={e => setNewMeetingTime(e.target.value)} placeholder="Time"
+                <input type="text" value={newMeetingDay} onChange={e => setNewMeetingDay(e.target.value)} placeholder="Meeting day"
+                  style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }} />
+                <input type="text" value={newMeetingTime} onChange={e => setNewMeetingTime(e.target.value)} placeholder="Time"
                   style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }} />
               </div>
               <input type="text" value={newLocation} onChange={e => setNewLocation(e.target.value)} placeholder="Location"
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
               <input type="text" value={newLeader} onChange={e => setNewLeader(e.target.value)} placeholder="Leader / teacher name"
                 style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
-              <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Default Session Template (optional)</label>
-              <select value={newDefaultTemplateId} onChange={e => setNewDefaultTemplateId(e.target.value)}
-                style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
-                <option value="">No default (choose per session)</option>
-                {CATEGORIES.map(cat => {
-                  const opts = templatesForCategory(cat.value)
-                  if (opts.length === 0) return null
-                  return (
-                    <optgroup key={cat.value} label={cat.label}>
-                      {opts.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </optgroup>
-                  )
-                })}
-              </select>
               {addClassError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addClassError}</div>}
               <button type="submit" className="btn btn-primary btn-sm" disabled={addingClass} style={{ width: '100%' }}>
-                {addingClass ? 'Saving…' : editingClassId ? 'Save Changes' : 'Add Class'}
+                {addingClass ? 'Adding…' : 'Add Class'}
               </button>
             </form>
           )}
@@ -2023,41 +1451,24 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                   padding: '12px 16px', cursor: 'pointer',
                   borderBottom: '1px solid var(--gray-100)',
                   background: selectedClass?.id === cls.id ? 'var(--burgundy-light)' : 'white',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px',
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: meta.bg, color: meta.fg }}>
-                    {meta.label}
-                  </span>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--gray-800)', marginTop: '4px' }}>{cls.name}</div>
-                  {(cls.meeting_day || cls.meeting_time) && (
-                    <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
-                      {[cls.meeting_day, cls.meeting_time].filter(Boolean).join(' · ')}
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                  <button onClick={e => { e.stopPropagation(); startEditClass(cls) }} title="Edit class"
-                    style={{ fontSize: '12px', color: 'var(--burgundy)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
-                    ✎
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); handleDeleteClass(cls) }} title="Delete class"
-                    style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
-                    🗑
-                  </button>
-                </div>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: meta.bg, color: meta.fg }}>
+                  {meta.label}
+                </span>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--gray-800)', marginTop: '4px' }}>{cls.name}</div>
+                {(cls.meeting_day || cls.meeting_time) && (
+                  <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
+                    {[cls.meeting_day, cls.meeting_time].filter(Boolean).join(' · ')}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       </div>
-      )}
 
       {/* Middle panel — sessions for selected class */}
-      {middleCollapsed ? (
-        <CollapsedPanelStrip label="Sessions" onExpand={() => setMiddleCollapsed(false)} />
-      ) : (
       <div style={{ width: '340px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--gray-100)', background: 'white' }}>
         {!selectedClass ? (
           <div className="empty-state" style={{ marginTop: '80px' }}>
@@ -2067,69 +1478,55 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
         ) : (
           <>
             <div style={{ padding: '20px', borderBottom: '1px solid var(--gray-100)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', color: 'var(--burgundy)', marginBottom: '4px' }}>
-                  {selectedClass.name}
-                </h2>
-                <button onClick={() => setMiddleCollapsed(true)} title="Collapse panel"
-                  style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '14px', padding: '4px' }}>
-                  ◀
-                </button>
-              </div>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', color: 'var(--burgundy)', marginBottom: '4px' }}>
+                {selectedClass.name}
+              </h2>
               {selectedClass.leader_name && (
                 <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>Led by {selectedClass.leader_name}</div>
               )}
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => startEditClass(selectedClass)} style={{ flex: 1 }}>✎ Edit Class</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteClass(selectedClass)} style={{ flex: 1, color: 'var(--danger)' }}>🗑 Delete Class</button>
-              </div>
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => {
-                  setShowAddSession(s => {
-                    const opening = !s
-                    if (opening && selectedClass?.default_template_id) {
-                      const dt = templates.find(t => t.id === selectedClass.default_template_id)
-                      if (dt) { setNewCategory(dt.category); setNewTemplateId(dt.id) }
-                    }
-                    return opening
-                  })
-                }} style={{ flex: 1 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowAddSession(s => !s)} style={{ flex: 1 }}>
                   {showAddSession ? '✕ Cancel' : '+ Add Session'}
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkAddSessions(true)} style={{ flex: 1 }}>
                   📅 Bulk Add
                 </button>
-                <ActionsMenu open={middleMenuOpen} setOpen={setMiddleMenuOpen} items={[
-                  { label: '⬇ Export CSV', onClick: handleExportSessionsCsv, disabled: sessions.length === 0 },
-                  { label: '📊 Export Excel', onClick: handleExportSessionsExcel, disabled: sessions.length === 0 },
-                  { label: '📝 Download Template', onClick: handleDownloadSessionsTemplate, disabled: sessions.length === 0 },
-                  { divider: true },
-                  { label: importingTemplate ? 'Importing…' : '⬆ Upload Filled Template', onClick: () => fileInputRef.current?.click(), disabled: importingTemplate },
-                ]} />
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportSessionsTemplate} />
               </div>
-              {importResult && (
-                <div style={{ fontSize: '11px', color: importResult.error ? 'var(--danger)' : 'var(--gray-400)', marginTop: '6px' }}>
-                  {importResult.error || `Updated ${importResult.updated} session(s)${importResult.skipped?.length ? `, ${importResult.skipped.length} date(s) not found` : ''}.`}
-                </div>
-              )}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsCsv} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  ⬇ CSV
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleExportSessionsExcel} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  📊 Excel
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleDownloadSessionsTemplate} disabled={sessions.length === 0} style={{ flex: 1 }}>
+                  📝 Template
+                </button>
+              </div>
+              <div style={{ marginTop: '6px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={importingTemplate} style={{ width: '100%' }}>
+                  {importingTemplate ? 'Importing…' : '⬆ Upload Filled Template'}
+                </button>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportSessionsTemplate} />
+                {importResult && (
+                  <div style={{ fontSize: '11px', color: importResult.error ? 'var(--danger)' : 'var(--gray-400)', marginTop: '6px' }}>
+                    {importResult.error || `Updated ${importResult.updated} session(s)${importResult.skipped?.length ? `, ${importResult.skipped.length} date(s) not found` : ''}.`}
+                  </div>
+                )}
+              </div>
               {showAddSession && (
                 <form onSubmit={handleAddSession} style={{ marginTop: '10px', background: 'var(--gray-50)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px' }}>
-                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Date</label>
                   <input type="date" value={newSessionDate} onChange={e => setNewSessionDate(e.target.value)} required
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
-                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Category</label>
                   <select value={newCategory} onChange={e => { setNewCategory(e.target.value); setNewTemplateId('') }}
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                     {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
-                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Template</label>
                   <select value={newTemplateId} onChange={e => setNewTemplateId(e.target.value)}
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }}>
                     <option value="">No template (blank session)</option>
                     {templatesForCategory(newCategory).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
-                  <label style={{ fontSize: '10px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '2px' }}>Topic</label>
                   <input type="text" value={newTopic} onChange={e => setNewTopic(e.target.value)} placeholder="Topic (optional)"
                     style={{ width: '100%', padding: '6px 8px', fontSize: '12px', marginBottom: '6px' }} />
                   {addSessionError && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '6px' }}>{addSessionError}</div>}
@@ -2139,19 +1536,12 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 </form>
               )}
             </div>
-            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--gray-100)' }}>
-              <select value={sessionCategoryFilter} onChange={e => setSessionCategoryFilter(e.target.value)}
-                style={{ width: '100%', padding: '5px 8px', fontSize: '12px' }}>
-                <option value="all">All Categories</option>
-                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-              </select>
-            </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
-              {sessionsLoading ? <div className="spinner" /> : filteredSessions.length === 0 ? (
+              {sessionsLoading ? <div className="spinner" /> : sessions.length === 0 ? (
                 <div style={{ padding: '24px', fontSize: '13px', color: 'var(--gray-400)', textAlign: 'center' }}>
-                  {sessions.length === 0 ? 'No sessions planned yet.' : 'No sessions match this filter.'}
+                  No sessions planned yet.
                 </div>
-              ) : filteredSessions.map(s => (
+              ) : sessions.map(s => (
                 <div
                   key={s.id}
                   onClick={() => selectSession(s)}
@@ -2163,13 +1553,7 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--gray-800)' }}>{formatDate(s.session_date)}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {s.attendance_pushed && <span title="Pushed to Attendance Tracker" style={{ fontSize: '11px' }}>✅</span>}
-                      <button onClick={e => { e.stopPropagation(); handleDeleteSession(s) }} title="Delete session"
-                        style={{ fontSize: '12px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}>
-                        🗑
-                      </button>
-                    </div>
+                    {s.attendance_pushed && <span title="Pushed to Attendance Tracker" style={{ fontSize: '11px' }}>✅</span>}
                   </div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
                     {s.category && (
@@ -2185,7 +1569,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
           </>
         )}
       </div>
-      )}
 
       {/* Right panel — session detail + attendance */}
       <div style={{ flex: 1, overflowY: 'auto', background: 'var(--gray-50)' }}>
@@ -2211,9 +1594,6 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 <select value={status} onChange={e => setStatus(e.target.value)} style={{ fontSize: '12px', padding: '4px 8px' }}>
                   {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <button className="btn btn-secondary btn-sm" onClick={() => handleDeleteSession(selectedSession)} style={{ color: 'var(--danger)', marginLeft: '8px' }}>
-                  🗑 Delete
-                </button>
               </div>
 
               <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Topic</label>
@@ -2319,21 +1699,16 @@ export default function ChristianEducation({ initialTarget, onConsumeTarget } = 
                 ✅ Attendance
               </h3>
               <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '10px' }}>
-                Record a headcount and any additional guests, then push it — it lands in the shared attendance data used by Directory/Attendance Tracker. Per-person, name-level attendance for CE classes isn't built yet; this pushes an aggregate count per session.
+                Per-person attendance will be available once the Attendance Tracker app is live and rosters are set up. For now, record a headcount and push it — it'll already be sitting in the shared attendance data once that app exists.
               </div>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '12px' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Headcount</label>
                   <input type="number" min="0" value={headcount} onChange={e => setHeadcount(e.target.value)}
                     style={{ width: '100px', padding: '6px 8px', fontSize: '13px' }} />
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-400)', display: 'block', marginBottom: '4px' }}>Guests</label>
-                  <input type="number" min="0" value={guestCount} onChange={e => setGuestCount(e.target.value)}
-                    style={{ width: '100px', padding: '6px 8px', fontSize: '13px' }} />
-                </div>
                 <button className="btn btn-secondary btn-sm" onClick={handleSaveHeadcount} disabled={savingHeadcount}>
-                  {savingHeadcount ? 'Saving…' : 'Save'}
+                  {savingHeadcount ? 'Saving…' : 'Save Headcount'}
                 </button>
               </div>
 
