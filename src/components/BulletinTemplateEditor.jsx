@@ -41,6 +41,8 @@ export default function BulletinTemplateEditor({ builtInDefaults, onClose, onSav
   const [rows, setRows] = useState([]) // working copy for selected type: [{id, type}]
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  const [dragId, setDragId] = useState(null)
+  const [overId, setOverId] = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -80,6 +82,29 @@ export default function BulletinTemplateEditor({ builtInDefaults, onClose, onSav
       return next
     })
   }
+
+  // Drag-to-reorder — drag the handle to drop a row anywhere in the list,
+  // instead of walking it there one arrow-click at a time.
+  function handleDragStart(id) { setDragId(id) }
+  function handleDragOver(e, id) {
+    e.preventDefault()
+    if (id !== overId) setOverId(id)
+  }
+  function handleDrop(id) {
+    setRows(prev => {
+      if (!dragId || dragId === id) return prev
+      const from = prev.findIndex(r => r.id === dragId)
+      const to = prev.findIndex(r => r.id === id)
+      if (from === -1 || to === -1) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+    setDragId(null)
+    setOverId(null)
+  }
+  function handleDragEnd() { setDragId(null); setOverId(null) }
 
   async function handleSave() {
     setSaving(true)
@@ -137,7 +162,26 @@ export default function BulletinTemplateEditor({ builtInDefaults, onClose, onSav
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '420px', overflowY: 'auto', marginBottom: '14px' }}>
                   {rows.map((row, idx) => (
-                    <div key={row.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'var(--gray-50)', padding: '8px 10px', borderRadius: '6px' }}>
+                    <div key={row.id}
+                      onDragOver={e => handleDragOver(e, row.id)}
+                      onDrop={() => handleDrop(row.id)}
+                      onDragEnd={handleDragEnd}
+                      style={{
+                        display: 'flex', gap: '8px', alignItems: 'center',
+                        background: overId === row.id && dragId !== row.id ? 'var(--burgundy-light)' : 'var(--gray-50)',
+                        padding: '8px 10px', borderRadius: '6px',
+                        border: overId === row.id && dragId !== row.id ? '2px dashed var(--burgundy)' : '2px solid transparent',
+                        opacity: dragId === row.id ? 0.4 : 1,
+                      }}
+                    >
+                      <span
+                        draggable
+                        onDragStart={() => handleDragStart(row.id)}
+                        title="Drag to reorder"
+                        style={{ cursor: 'grab', fontSize: '15px', color: 'var(--gray-400)', flexShrink: 0, userSelect: 'none', touchAction: 'none' }}
+                      >
+                        ⠿
+                      </span>
                       <span style={{ fontSize: '11px', color: 'var(--gray-400)', width: '20px', flexShrink: 0 }}>{idx + 1}</span>
                       <select value={row.type} onChange={e => changeType(row.id, e.target.value)} style={{ flex: 1, padding: '6px 8px', fontSize: '13px' }}>
                         {ROW_TYPE_OPTIONS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
