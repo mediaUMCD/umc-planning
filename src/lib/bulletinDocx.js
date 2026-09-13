@@ -46,38 +46,62 @@ function run(text, opts = {}) {
   return new TextRun({ text, font: FONT, size: BODY_SIZE, ...opts })
 }
 
-// Splits a line that may contain <strong>/<b> and <em>/<i> tags (from the
-// Call to Worship / Offertory Prayer rich text boxes) into TextRuns with
-// bold/italics set, instead of printing the raw tags as literal text.
-function decodeHtmlEntities(text) {
-  return text
-    .replace(/&nbsp;/gi, '\u00A0')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, '\u2019')
-    .replace(/&rsquo;/gi, '\u2019')
-    .replace(/&lsquo;/gi, '\u2018')
-    .replace(/&rdquo;/gi, '\u201D')
-    .replace(/&ldquo;/gi, '\u201C')
-    .replace(/&mdash;/gi, '\u2014')
-    .replace(/&ndash;/gi, '\u2013')
-}
+// Turns a line of rich-text HTML (from the Call to Worship / Offertory
+// Prayer / Call & Response boxes) into TextRuns with bold/italics set.
+//
+// This walks the actual DOM instead of regex-matching the HTML string.
+// The regex approach only recognized literal <strong>/<b> and <em>/<i>
+// tags — but the browser's execCommand('bold'/'italic') doesn't always
+// emit those. Depending on the browser/selection, it can instead wrap
+// text in <span style="font-weight: bold"> (or use "font-weight: normal"
+// / "font-style: normal" spans to un-bold/un-italicize part of an already
+// -formatted selection). A regex looking only for <strong>/<em> can't
+// match those, and — because the tag doesn't match any alternative in the
+// pattern — the raw "span style=..." text fell through and got printed
+// literally in the docx ("shows the coding instead of bolding letters").
+// Walking the DOM and reading each element's actual tag name *and* inline
+// style handles every case the browser can produce, not just one.
+function parseFormattedRuns(html, runOpts = {}) {
+  if (!html) return [run('', runOpts)]
+  const container = document.createElement('div')
+  container.innerHTML = html
 
-function parseFormattedRuns(text, runOpts = {}) {
-  if (!text) return [run('', runOpts)]
-  const normalized = text
-    .replace(/<b>/gi, '<strong>').replace(/<\/b>/gi, '</strong>')
-    .replace(/<i>/gi, '<em>').replace(/<\/i>/gi, '</em>')
-  const runs = []
-  const pattern = /<strong>(.*?)<\/strong>|<em>(.*?)<\/em>|([^<]+)/gi
-  let match
-  while ((match = pattern.exec(normalized)) !== null) {
-    if (match[1] !== undefined) runs.push(run(decodeHtmlEntities(match[1]), { ...runOpts, bold: true }))
-    else if (match[2] !== undefined) runs.push(run(decodeHtmlEntities(match[2]), { ...runOpts, italics: true }))
-    else if (match[3]) runs.push(run(decodeHtmlEntities(match[3]), runOpts))
+  function nextFormatState(el, inherited) {
+    let { bold, italics } = inherited
+    const tag = el.tagName
+    if (tag === 'B' || tag === 'STRONG') bold = true
+    if (tag === 'I' || tag === 'EM') italics = true
+    const fontWeight = el.style?.fontWeight
+    if (fontWeight) {
+      const n = parseInt(fontWeight, 10)
+      if (fontWeight === 'bold' || (!isNaN(n) && n >= 600)) bold = true
+      else if (fontWeight === 'normal' || (!isNaN(n) && n < 600)) bold = false
+    }
+    const fontStyle = el.style?.fontStyle
+    if (fontStyle === 'italic') italics = true
+    else if (fontStyle === 'normal') italics = false
+    return { bold, italics }
   }
+
+  const runs = []
+  function walk(node, state) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent) {
+        runs.push(run(node.textContent, {
+          ...runOpts,
+          ...(state.bold ? { bold: true } : {}),
+          ...(state.italics ? { italics: true } : {}),
+        }))
+      }
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    if (node.tagName === 'BR') { runs.push(run('\n', runOpts)); return }
+    const next = nextFormatState(node, state)
+    for (const child of node.childNodes) walk(child, next)
+  }
+  for (const child of container.childNodes) walk(child, { bold: false, italics: false })
+
   return runs.length ? runs : [run('', runOpts)]
 }
 
