@@ -1,7 +1,54 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 
 const sectionHead = { fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '14px', textTransform: 'uppercase', letterSpacing: '0.03em' }
+
+// Same bucket used for the per-service back cover photo in Service Planner.
+const BACK_COVER_BUCKET = 'event-photos'
+async function uploadBackCoverPhoto(file) {
+  const ext = file.name.split('.').pop()
+  const fileName = `back-cover-${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from(BACK_COVER_BUCKET).upload(fileName, file, { cacheControl: '3600', upsert: false })
+  if (error) throw error
+  const { data } = supabase.storage.from(BACK_COVER_BUCKET).getPublicUrl(fileName)
+  return data.publicUrl
+}
+
+function PhotoPicker({ url, onChange, uploadFn, placeholder }) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState(null)
+  const inputRef = useRef(null)
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    try {
+      const publicUrl = await uploadFn(file)
+      onChange(publicUrl)
+    } catch (err) {
+      setError(err.message)
+    }
+    setUploading(false)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  return (
+    <div>
+      {url && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <img src={url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--gray-200)' }} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('')}>Remove</button>
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} disabled={uploading} />
+      {uploading && <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>Uploading…</div>}
+      {error && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '4px' }}>Couldn't upload: {error}</div>}
+      {!url && placeholder && <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>{placeholder}</div>}
+    </div>
+  )
+}
 
 function emptyDay() { return { day: '', lines: [''] } }
 function emptyZoom() { return { label: '', meeting_id: '' } }
@@ -225,8 +272,12 @@ export default function BulletinSettings() {
               <input type="text" value={row.church_tagline || ''} onChange={e => setRow(r => ({ ...r, church_tagline: e.target.value }))} placeholder="Repentance, Renewal, Reform" />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Default Back Cover Photo URL</label>
-              <input type="text" value={row.default_back_cover_photo_url || ''} onChange={e => setRow(r => ({ ...r, default_back_cover_photo_url: e.target.value }))} placeholder="https://..." />
+              <label className="form-label">Default Back Cover Photo</label>
+              <PhotoPicker
+                url={row.default_back_cover_photo_url}
+                onChange={url => setRow(r => ({ ...r, default_back_cover_photo_url: url }))}
+                uploadFn={uploadBackCoverPhoto}
+              />
               <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>
                 Used when a service doesn't have its own photo set. Individual services can override this from the Service Planner.
               </div>

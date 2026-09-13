@@ -13,6 +13,57 @@ const BIBLE_VERSIONS = ['CEB', 'NRSVue', 'KJV', 'MSG', 'RSV', 'OTHER']
 const SERVICE_TYPES = ['Regular Sunday', 'Communion Sunday', 'Advent', 'Christmas Eve', 'Ash Wednesday', 'Maundy Thursday', 'Good Friday', 'Easter', 'Pentecost', 'Rally Day', 'Lessons & Carols', 'Special Service']
 const PAGE_REFS = new Set([7, 8, 9, 10, 11, 12, 13, 14, 94, 95, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900])
 
+// Reuses the existing public event-photos bucket rather than adding a new
+// one just for this — it's already public and general-purpose.
+const BACK_COVER_BUCKET = 'event-photos'
+async function uploadBackCoverPhoto(file) {
+  const ext = file.name.split('.').pop()
+  const fileName = `back-cover-${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from(BACK_COVER_BUCKET).upload(fileName, file, { cacheControl: '3600', upsert: false })
+  if (error) throw error
+  const { data } = supabase.storage.from(BACK_COVER_BUCKET).getPublicUrl(fileName)
+  return data.publicUrl
+}
+
+// Small upload + preview control for a single photo URL field — used for
+// both the per-service back cover photo (Service Planner) and the
+// church-wide default (Bulletin Settings).
+function PhotoPicker({ url, onChange, uploadFn, placeholder }) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState(null)
+  const inputRef = useRef(null)
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    try {
+      const publicUrl = await uploadFn(file)
+      onChange(publicUrl)
+    } catch (err) {
+      setError(err.message)
+    }
+    setUploading(false)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  return (
+    <div>
+      {url && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+          <img src={url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--gray-200)' }} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('')}>Remove</button>
+        </div>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} disabled={uploading} />
+      {uploading && <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>Uploading…</div>}
+      {error && <div style={{ fontSize: '12px', color: 'var(--danger)', marginTop: '4px' }}>Couldn't upload: {error}</div>}
+      {!url && placeholder && <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>{placeholder}</div>}
+    </div>
+  )
+}
+
 function buildBibleGatewayUrl(reference, version) {
   return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${encodeURIComponent(version || 'CEB')}`
 }
@@ -807,7 +858,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       { header: 'Date', key: 'date', width: 14 },
       { header: 'Hymnal (UMH/TFWS/Other)', key: 'hymnal', width: 20 },
       { header: 'Number', key: 'number', width: 10 },
-      { header: 'Title (optional)', key: 'title', width: 30 },
+      { header: 'Title (reference — only used for new hymn numbers)', key: 'title', width: 42 },
       { header: 'Sort Order', key: 'sort_order', width: 12 },
       { header: 'Closing Hymn?', key: 'closing', width: 14 },
     ]
@@ -816,7 +867,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     for (const s of services) {
       for (const h of (s.service_hymns || []).sort((a, b) => a.sort_order - b.sort_order)) {
         hymnSheet.addRow({
-          date: s.service_date, hymnal: h.hymnal, number: h.number, title: h.title || '',
+          date: s.service_date, hymnal: h.hymnal, number: h.number,
+          title: lookupHymnTitle(h.hymnal, h.number),
           sort_order: h.sort_order, closing: h.is_closing ? 'Yes' : '',
         })
       }
@@ -855,6 +907,12 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     refSheet.addRow(['Hymns and Scriptures tabs: leave a date out entirely to keep that service\'s'])
     refSheet.addRow(['existing hymns/scripture untouched. Include a date to replace all of that'])
     refSheet.addRow(['service\'s hymns/scripture with exactly what\'s listed under that date.'])
+    refSheet.addRow([])
+    refSheet.addRow(['Hymns tab "Title" column is reference only for hymns already in the'])
+    refSheet.addRow(['Hymnal list (HymnTracker) — the title always comes from there on upload,'])
+    refSheet.addRow(['so editing it here for a known hymn has no effect. For a hymn NUMBER'])
+    refSheet.addRow(['that isn\'t in the Hymnal list yet, the title you type here is used to'])
+    refSheet.addRow(['add it to the Hymnal list so it displays correctly going forward.'])
 
     const buffer = await wb.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
@@ -947,6 +1005,15 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
 
       // ── Hymns (replace-by-date: only touch dates present in the sheet) ──
       if (hymnSheet) {
+        // service_hymns has no title column — the title always comes from the
+        // master Hymnal list (HymnTracker) by hymnal+number, everywhere in the
+        // app. So the sheet's "Title" column is only meaningful for a hymn
+        // number that ISN'T in the Hymnal list yet: for those, we add it to
+        // the master list (once) so it has a title going forward. For a hymn
+        // that's already known, whatever's typed in that column is ignored —
+        // it's never saved per-service, so it can't shadow the real title.
+        const knownHymnKeys = new Set(hymns.map(h => `${h.hymnal}-${parseFloat(h.number)}`))
+        const newHymnsToRegister = new Map() // key -> { hymnal, number, title }
         const hymnsByDate = {}
         hymnSheet.eachRow((row, rowNumber) => {
           if (rowNumber === 1) return
@@ -955,21 +1022,36 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           const number = row.getCell(3).value
           if (!dateStr || !number) return
           if (!hymnsByDate[dateStr]) hymnsByDate[dateStr] = []
+          const hymnal = (row.getCell(2).value ?? 'UMH').toString().trim() || 'UMH'
+          const parsedNumber = parseInt(number)
+          const importedTitle = (row.getCell(4).value ?? '').toString().trim() || null
+          const key = `${hymnal}-${parseFloat(parsedNumber)}`
+          if (!knownHymnKeys.has(key) && importedTitle && !newHymnsToRegister.has(key)) {
+            newHymnsToRegister.set(key, { hymnal, number: parsedNumber, title: importedTitle })
+          }
           hymnsByDate[dateStr].push({
-            hymnal: (row.getCell(2).value ?? 'UMH').toString().trim() || 'UMH',
-            number: parseInt(number),
-            title: (row.getCell(4).value ?? '').toString().trim() || null,
+            hymnal,
+            number: parsedNumber,
             sort_order: parseInt(row.getCell(5).value) || hymnsByDate[dateStr].length + 1,
             is_closing: (row.getCell(6).value ?? '').toString().trim().toLowerCase() === 'yes',
           })
         })
+
+        if (newHymnsToRegister.size > 0) {
+          const { error: newHymnErr } = await supabase.from('hymns')
+            .insert([...newHymnsToRegister.values()].map(h => ({ ...h, is_created: false })))
+          if (newHymnErr) skipped.push(`Couldn't add new hymn(s) to the Hymnal list (${newHymnErr.message})`)
+        }
+
         for (const [date, hymnRows] of Object.entries(hymnsByDate)) {
           const serviceId = dateToId[date]
           if (!serviceId) { skipped.push(`Hymns for ${date} (no matching service — add it on the Services tab first)`); continue }
-          await supabase.from('service_hymns').delete().eq('service_date_id', serviceId)
-          await supabase.from('service_hymns').insert(
+          const { error: delErr } = await supabase.from('service_hymns').delete().eq('service_date_id', serviceId)
+          if (delErr) { skipped.push(`Hymns for ${date} (couldn't clear existing rows: ${delErr.message})`); continue }
+          const { error: insErr } = await supabase.from('service_hymns').insert(
             hymnRows.map(h => ({ service_date_id: serviceId, ...h }))
           )
+          if (insErr) skipped.push(`Hymns for ${date} (${insErr.message})`)
         }
       }
 
@@ -1469,6 +1551,16 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
             <div className="card">
               <h2 style={sectionHead}>📣 Announcements List <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(Page 2)</span></h2>
               <textarea value={form.announcements_list} onChange={e => setForm(f => ({ ...f, announcements_list: e.target.value }))} placeholder={'One per line, e.g.:\nToday: Luncheon after Church – bring a side dish to share.\n6/27: Grief Group @ 10:15 a.m.'} style={{ minHeight: '100px' }} />
+            </div>
+
+            <div className="card">
+              <h2 style={sectionHead}>🖼️ Back Cover Photo <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(Page 2)</span></h2>
+              <PhotoPicker
+                url={form.back_cover_photo_url}
+                onChange={url => setForm(f => ({ ...f, back_cover_photo_url: url }))}
+                uploadFn={uploadBackCoverPhoto}
+                placeholder="Optional — leave blank to use the church-wide default photo from Bulletin Settings."
+              />
             </div>
           </div>
         </div>
