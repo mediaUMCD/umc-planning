@@ -288,6 +288,12 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
     case 'apostles_creed':
       if (!service.apostles_creed_ref) return null
       return { type: 'tabbed', label: 'APOSTLES CREED', middle: '', right: service.apostles_creed_ref }
+    case 'confession_pardon':
+      return { type: 'static-label', label: row.contentOverride ?? 'CONFESSION & PARDON' }
+    case 'invitation':
+      return { type: 'static-label', label: row.contentOverride ?? 'INVITATION' }
+    case 'communion':
+      return { type: 'static-label', label: row.contentOverride ?? 'COMMUNION (GIVING THE BREAD AND CUP)' }
     case 'pastoral_prayer':
       return { type: 'tabbed', label: 'JOYS AND CONCERNS/PASTORAL PRAYER', middle: '', right: service.pastoral_prayer_person || '' }
     case 'lords_prayer':
@@ -305,6 +311,8 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
       return { type: 'tabbed', label: 'WEEKLY ANNOUNCEMENTS', middle: '', right: service.announcements_reader || '' }
     case 'benediction':
       return { type: 'static-label', label: row.contentOverride ?? 'BENEDICTION' }
+    case 'spacer':
+      return { type: 'blank' }
     case 'great_thanksgiving':
       return { type: 'static-label', label: row.contentOverride ?? 'GREAT THANKSGIVING' }
     case 'breaking_the_bread':

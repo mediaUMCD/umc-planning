@@ -218,6 +218,16 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
         col2: { mode: 'direct', field: 'apostles_creed_ref', value: form.apostles_creed_ref, placeholder: 'UMH #881' },
         col3: { mode: 'none' },
       }
+    case 'confession_pardon':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Confession & Pardon', placeholder: 'Confession & Pardon' },
+        col3: { mode: 'none' },
+      }
+    case 'invitation':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Invitation', placeholder: 'Invitation' },
+        col3: { mode: 'none' },
+      }
     case 'great_thanksgiving':
       return {
         col2: { mode: 'override', value: row.contentOverride ?? 'Great Thanksgiving', placeholder: 'Great Thanksgiving' },
@@ -226,6 +236,11 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
     case 'breaking_the_bread':
       return {
         col2: { mode: 'override', value: row.contentOverride ?? 'Breaking the Bread', placeholder: 'Breaking the Bread' },
+        col3: { mode: 'none' },
+      }
+    case 'communion':
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'Communion (Giving the Bread and Cup)', placeholder: 'Communion (Giving the Bread and Cup)' },
         col3: { mode: 'none' },
       }
     case 'imposition_of_ashes':
@@ -268,6 +283,9 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
         col2: { mode: 'override', value: row.contentOverride ?? 'Benediction', placeholder: 'Benediction' },
         col3: { mode: 'none' },
       }
+    case 'spacer':
+      // Just adds vertical space in the printed bulletin — no content to edit.
+      return { col2: { mode: 'none' }, col3: { mode: 'none' } }
     case 'custom':
       return {
         col2: { mode: 'custom', value: row.customContent || '', placeholder: 'Content' },
@@ -355,8 +373,11 @@ const ROW_TYPES = [
   { key: 'special_music', label: 'Special music' },
   { key: 'sermon', label: 'Sermon' },
   { key: 'apostles_creed', label: "Apostles' creed" },
+  { key: 'confession_pardon', label: 'Confession & Pardon' },
+  { key: 'invitation', label: 'Invitation' },
   { key: 'great_thanksgiving', label: 'Great Thanksgiving' },
   { key: 'breaking_the_bread', label: 'Breaking the Bread' },
+  { key: 'communion', label: 'Communion (Giving the Bread and Cup)' },
   { key: 'imposition_of_ashes', label: 'Imposition of Ashes' },
   { key: 'candlelighting', label: 'Candlelighting' },
   { key: 'pastoral_prayer', label: 'Pastoral prayer' },
@@ -366,6 +387,7 @@ const ROW_TYPES = [
   { key: 'announcements', label: 'Announcements' },
   { key: 'closing_hymn', label: 'Closing hymn' },
   { key: 'benediction', label: 'Benediction' },
+  { key: 'spacer', label: 'Blank line (spacing)' },
   { key: 'custom', label: 'Custom' },
 ]
 const ROW_TYPE_LABELS = Object.fromEntries(ROW_TYPES.map(t => [t.key, t.label]))

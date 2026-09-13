@@ -10,8 +10,11 @@ const ROW_TYPE_OPTIONS = [
   { key: 'special_music', label: 'Special music' },
   { key: 'sermon', label: 'Sermon' },
   { key: 'apostles_creed', label: "Apostles' creed" },
+  { key: 'confession_pardon', label: 'Confession & Pardon' },
+  { key: 'invitation', label: 'Invitation' },
   { key: 'great_thanksgiving', label: 'Great Thanksgiving' },
   { key: 'breaking_the_bread', label: 'Breaking the Bread' },
+  { key: 'communion', label: 'Communion (Giving the Bread and Cup)' },
   { key: 'imposition_of_ashes', label: 'Imposition of Ashes' },
   { key: 'candlelighting', label: 'Candlelighting' },
   { key: 'pastoral_prayer', label: 'Pastoral prayer' },
@@ -21,6 +24,7 @@ const ROW_TYPE_OPTIONS = [
   { key: 'announcements', label: 'Announcements' },
   { key: 'closing_hymn', label: 'Closing hymn' },
   { key: 'benediction', label: 'Benediction' },
+  { key: 'spacer', label: 'Blank line (spacing)' },
   { key: 'custom', label: 'Custom' },
 ]
 const LABEL_BY_KEY = Object.fromEntries(ROW_TYPE_OPTIONS.map(t => [t.key, t.label]))

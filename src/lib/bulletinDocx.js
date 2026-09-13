@@ -186,6 +186,8 @@ function buildOrderOfServiceParagraphs(service, hymns, scriptures) {
   for (const item of items) {
     if (item.type === 'static-label') {
       paragraphs.push(para(run(item.label)))
+    } else if (item.type === 'blank') {
+      paragraphs.push(blankLine())
     } else if (item.type === 'tabbed') {
       paragraphs.push(tabbedPara(item.label, item.middle, item.right, tabStops))
     } else if (item.type === 'inline') {

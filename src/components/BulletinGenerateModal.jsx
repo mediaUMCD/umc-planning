@@ -26,6 +26,9 @@ function downloadBlob(blob, filename) {
 /** Renders one Order-of-Service item the same way for the HTML preview. */
 function OrderItem({ item, isLandscape }) {
   const style = { margin: '0 0 2px 0' }
+  if (item.type === 'blank') {
+    return <div style={{ height: '14px' }} />
+  }
   if (item.type === 'static-label') {
     return <p style={style}>{item.label}</p>
   }
