@@ -213,6 +213,12 @@ function resolveRow(row, form, serviceHymns, serviceScriptures) {
         col2: { mode: 'ask', value: row.contentOverride ?? form.spark_title, sourceValue: form.spark_title, placeholder: '(no Spark title entered above)' },
         col3: { mode: 'direct', field: 'spark_preacher', value: form.spark_preacher, placeholder: '' },
       }
+    case 'prayer_of_illumination':
+      // Page number is stored on the row itself, so each bulletin can change it.
+      return {
+        col2: { mode: 'override', value: row.contentOverride ?? 'UMH p. 6', placeholder: 'Page (e.g. UMH p. 6)' },
+        col3: { mode: 'none' },
+      }
     case 'apostles_creed':
       return {
         col2: { mode: 'direct', field: 'apostles_creed_ref', value: form.apostles_creed_ref, placeholder: 'UMH #881' },
@@ -368,6 +374,7 @@ const ROW_TYPES = [
   { key: 'welcome', label: 'Welcome' },
   { key: 'call_to_worship', label: 'Call to worship' },
   { key: 'hymn', label: 'Hymn' },
+  { key: 'prayer_of_illumination', label: 'Prayer of Illumination' },
   { key: 'scripture', label: 'Scripture reading' },
   { key: 'childrens_message', label: "Children's message" },
   { key: 'special_music', label: 'Special music' },

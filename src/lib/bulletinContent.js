@@ -285,6 +285,8 @@ function itemForRow(row, occurrence, service, hymns, scriptures) {
         middle: title ? `\u201C${title}\u201D` : '', right: service.spark_preacher || '',
       }
     }
+    case 'prayer_of_illumination':
+      return { type: 'tabbed', label: 'PRAYER OF ILLUMINATION', middle: '', right: row.contentOverride ?? 'UMH p. 6' }
     case 'apostles_creed':
       if (!service.apostles_creed_ref) return null
       return { type: 'tabbed', label: 'APOSTLES CREED', middle: '', right: service.apostles_creed_ref }

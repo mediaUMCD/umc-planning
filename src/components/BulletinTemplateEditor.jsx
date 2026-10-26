@@ -5,6 +5,7 @@ const ROW_TYPE_OPTIONS = [
   { key: 'welcome', label: 'Welcome' },
   { key: 'call_to_worship', label: 'Call to worship' },
   { key: 'hymn', label: 'Hymn' },
+  { key: 'prayer_of_illumination', label: 'Prayer of Illumination' },
   { key: 'scripture', label: 'Scripture reading' },
   { key: 'childrens_message', label: "Children's message" },
   { key: 'special_music', label: 'Special music' },
