@@ -14,6 +14,7 @@ import Fundraising from './pages/Fundraising.jsx'
 import Approve from './pages/Approve.jsx'
 import SetList from './pages/SetList.jsx'
 import ChristianEducation from './pages/ChristianEducation.jsx'
+import SeriesStudies from './pages/SeriesStudies.jsx'
 import Sidebar from './components/Sidebar.jsx'
 
 const PUBLIC_PATHS = ['/setlist', '/setlist/']
@@ -115,6 +116,7 @@ export default function App() {
       )
       case 'hymns': return <HymnTracker />
       case 'christian-education': return <ChristianEducation initialTarget={ceTarget} onConsumeTarget={() => setCeTarget(null)} />
+      case 'series': return <SeriesStudies onOpenCE={navigateToCE} />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
