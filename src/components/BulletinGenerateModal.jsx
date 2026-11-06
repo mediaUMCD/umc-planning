@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { generateBulletinDocx } from '../lib/bulletinDocx.js'
+import { loadScheduleItems } from '../lib/bulletinSchedule.js'
 import {
   WELCOME_PARAGRAPH_1, WELCOME_PARAGRAPH_2, OFFERING_TEXT, CHURCH_NAME,
   buildOrderOfService, buildPageTwo,
@@ -156,9 +157,12 @@ export default function BulletinGenerateModal({ service, hymns, scriptures, onCl
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const { data, error } = await supabase.from('bulletin_static_content').select('*').limit(1).single()
+      const [{ data, error }, scheduleItems] = await Promise.all([
+        supabase.from('bulletin_static_content').select('*').limit(1).single(),
+        loadScheduleItems(),
+      ])
       if (error) setError('Could not load static bulletin content (weekly schedule, Zoom info, staff directory). Set this up on the Bulletin Settings page first.')
-      setStaticContent(data || null)
+      setStaticContent((data || scheduleItems) ? { ...(data || {}), schedule_items: scheduleItems } : null)
       setLoading(false)
     }
     load()

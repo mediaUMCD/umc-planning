@@ -1,4 +1,5 @@
 // src/lib/bulletinContent.js
+import { scheduleToBulletin } from './bulletinSchedule.js'
 //
 // Shared data-shaping logic for bulletin generation.
 // Both the .docx generator (bulletinDocx.js) and the in-app HTML preview
@@ -381,7 +382,11 @@ export function buildPageTwo(service, staticContent) {
     offeringPrayerSource: service.offering_prayer_source || '',
     callToWorshipSource: service.call_to_worship_source || '',
     announcementsList: (service.announcements_list || '').split('\n').map(l => l.trim()).filter(Boolean),
-    weeklySchedule: staticContent?.weekly_schedule || [],
+    // From the website's Schedules list; falls back to the old hand-typed list
+    weeklySchedule: (() => {
+      const fromWebsite = scheduleToBulletin(staticContent?.schedule_items, service.service_date)
+      return fromWebsite.length ? fromWebsite : (staticContent?.weekly_schedule || [])
+    })(),
     zoomInfo: staticContent?.zoom_info || [],
     staffDirectory: staticContent?.staff_directory || [],
     churchOfficeHours: staticContent?.church_office_hours || '',

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { loadScheduleItems, scheduleToBulletin } from '../lib/bulletinSchedule.js'
 
 const sectionHead = { fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--burgundy)', marginBottom: '14px', textTransform: 'uppercase', letterSpacing: '0.03em' }
 
@@ -50,7 +51,6 @@ function PhotoPicker({ url, onChange, uploadFn, placeholder }) {
   )
 }
 
-function emptyDay() { return { day: '', lines: [''] } }
 function emptyZoom() { return { label: '', meeting_id: '' } }
 function emptyStaff() { return { role: '', name: '' } }
 
@@ -61,7 +61,12 @@ export default function BulletinSettings() {
   const [saveStatus, setSaveStatus] = useState(null)
   const [error, setError] = useState(null)
 
+  const [websiteSchedule, setWebsiteSchedule] = useState(null)
+
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    loadScheduleItems().then(items => setWebsiteSchedule(scheduleToBulletin(items || [])))
+  }, [])
 
   async function load() {
     setLoading(true)
@@ -107,31 +112,6 @@ export default function BulletinSettings() {
     }
   }
 
-  // ── Weekly schedule helpers ──
-  function updateDay(idx, field, value) {
-    setRow(r => ({ ...r, weekly_schedule: r.weekly_schedule.map((d, i) => i === idx ? { ...d, [field]: value } : d) }))
-  }
-  function updateDayLine(dayIdx, lineIdx, value) {
-    setRow(r => ({
-      ...r,
-      weekly_schedule: r.weekly_schedule.map((d, i) => i === dayIdx
-        ? { ...d, lines: d.lines.map((l, j) => j === lineIdx ? value : l) }
-        : d),
-    }))
-  }
-  function addDayLine(dayIdx) {
-    setRow(r => ({ ...r, weekly_schedule: r.weekly_schedule.map((d, i) => i === dayIdx ? { ...d, lines: [...d.lines, ''] } : d) }))
-  }
-  function removeDayLine(dayIdx, lineIdx) {
-    setRow(r => ({
-      ...r,
-      weekly_schedule: r.weekly_schedule.map((d, i) => i === dayIdx
-        ? { ...d, lines: d.lines.filter((_, j) => j !== lineIdx) }
-        : d),
-    }))
-  }
-  function addDay() { setRow(r => ({ ...r, weekly_schedule: [...r.weekly_schedule, emptyDay()] })) }
-  function removeDay(idx) { setRow(r => ({ ...r, weekly_schedule: r.weekly_schedule.filter((_, i) => i !== idx) })) }
 
   // ── Zoom helpers ──
   function updateZoom(idx, field, value) { setRow(r => ({ ...r, zoom_info: r.zoom_info.map((z, i) => i === idx ? { ...z, [field]: value } : z) })) }
@@ -178,28 +158,33 @@ export default function BulletinSettings() {
       <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-          {/* Weekly Schedule */}
+          {/* Weekly Schedule — now read from the website */}
           <div className="card">
             <h2 style={sectionHead}>📅 Another Week in the World</h2>
-            {row.weekly_schedule.map((day, dIdx) => (
-              <div key={dIdx} style={{ border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginBottom: '8px' }}>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <label className="form-label">Day / Frequency Label</label>
-                    <input type="text" value={day.day} onChange={e => updateDay(dIdx, 'day', e.target.value)} placeholder="e.g. Sunday, 3rd Tuesday of the Month" style={{ padding: '6px 8px', fontSize: '13px' }} />
-                  </div>
-                  <button type="button" className="btn btn-danger btn-sm" onClick={() => removeDay(dIdx)} style={{ padding: '6px 10px', fontSize: '12px' }}>✕</button>
-                </div>
-                {day.lines.map((line, lIdx) => (
-                  <div key={lIdx} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                    <input type="text" value={line} onChange={e => updateDayLine(dIdx, lIdx, e.target.value)} placeholder="e.g. 9:30 a.m. Sunday School (Up/Downstairs)" style={{ flex: 1, padding: '6px 8px', fontSize: '13px' }} />
-                    <button type="button" className="btn btn-secondary" onClick={() => removeDayLine(dIdx, lIdx)} style={{ padding: '6px 10px', fontSize: '12px' }}>✕</button>
+            <p style={{ fontSize: '13px', color: 'var(--gray-500)', margin: '0 0 12px 0', lineHeight: 1.5 }}>
+              This now comes straight from the website&rsquo;s schedule, so you only update it in one place.
+              Change it on the website under <strong>Admin → 🗓️ Schedules</strong> and the next bulletin you generate picks it up.
+              Seasonal items show only in the weeks they run.
+            </p>
+            {websiteSchedule === null ? (
+              <p style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Loading…</p>
+            ) : websiteSchedule.length === 0 ? (
+              <p style={{ fontSize: '13px', color: 'var(--gray-500)' }}>
+                The website schedule is empty or couldn&rsquo;t be loaded, so bulletins will use the older saved list for now.
+              </p>
+            ) : (
+              <div style={{ background: 'var(--gray-50, #faf8f6)', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '12px 14px', fontFamily: 'Georgia, serif', fontSize: '13px', lineHeight: 1.6, marginBottom: '12px' }}>
+                {websiteSchedule.map((day, i) => (
+                  <div key={i}>
+                    <div>{day.day}:&nbsp;&nbsp; {day.lines[0]}</div>
+                    {day.lines.slice(1).map((l, j) => <div key={j} style={{ paddingLeft: '20px' }}>{l}</div>)}
                   </div>
                 ))}
-                <button type="button" className="btn btn-secondary" onClick={() => addDayLine(dIdx)} style={{ fontSize: '12px', padding: '5px 10px' }}>+ Add line</button>
               </div>
-            ))}
-            <button type="button" className="btn btn-secondary" onClick={addDay}>+ Add Day / Entry</button>
+            )}
+            <a href="https://umcdanielson.org/#admin" target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ display: 'inline-block', textDecoration: 'none' }}>
+              ✏️ Edit the schedule on the website ↗
+            </a>
           </div>
 
           {/* Zoom Info */}
