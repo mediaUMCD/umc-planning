@@ -490,6 +490,8 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
   const [importingBulk, setImportingBulk] = useState(false)
   const [bulkImportResult, setBulkImportResult] = useState(null)
   const bulkFileInputRef = useRef(null)
+  // Revised Common Lectionary, keyed by date: { 'YYYY-MM-DD': [{ title, lectionary_year, readings, url }] }
+  const [lectionary, setLectionary] = useState({})
   const [serviceScriptures, setServiceScriptures] = useState([
     { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' },
     { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
@@ -510,6 +512,12 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       setHymns(sorted)
 
       const tplMap = await loadBulletinTemplates()
+
+      // Lectionary (synced weekly from Vanderbilt) — small table, load it all once
+      const { data: lectData } = await supabase.from('lectionary_days').select('day, title, lectionary_year, readings, url').order('day')
+      const lectMap = {}
+      for (const l of lectData || []) (lectMap[l.day] = lectMap[l.day] || []).push(l)
+      setLectionary(lectMap)
 
       const { data: svcData } = await supabase.from('service_dates').select('*, service_hymns(*), service_scriptures(*)').order('service_date', { ascending: true })
       setServices(svcData || [])
@@ -645,6 +653,19 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     })
   }
   function updateScripture(idx, field, value) { setServiceScriptures(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s)) }
+
+  // Drops a lectionary reading into the first empty Reading slot (or adds a
+  // new one). Gospel readings are marked as Gospel automatically.
+  function addLectionaryReading(reference) {
+    const isGospel = /^(Matthew|Mark|Luke|John)\s/.test(reference)
+    const emptyIdx = serviceScriptures.findIndex(s => !(s.reference || '').trim() && !s.is_call_and_response)
+    if (emptyIdx >= 0) {
+      setServiceScriptures(prev => prev.map((s, i) => i === emptyIdx ? { ...s, reference, is_gospel: isGospel || s.is_gospel } : s))
+    } else {
+      addScripture()
+      setServiceScriptures(prev => prev.map((s, i) => i === prev.length - 1 ? { ...s, reference, is_gospel: isGospel } : s))
+    }
+  }
   function updateHymn(idx, field, value) { setServiceHymns(prev => prev.map((h, i) => i === idx ? { ...h, [field]: value } : h)) }
 
   // ── Order builder row management ──
@@ -1416,6 +1437,11 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                 <h2 style={{ ...sectionHead, margin: 0 }}>📖 Scripture Readings</h2>
                 <button className="btn btn-secondary btn-sm" onClick={addScripture}>+ Add</button>
               </div>
+              <LectionaryPanel
+                days={form.service_date ? (lectionary[form.service_date] || []) : null}
+                used={serviceScriptures.map(s => (s.reference || '').trim())}
+                onUse={addLectionaryReading}
+              />
               {serviceScriptures.map((s, idx) => (
                 <div key={idx} style={{ border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -1772,6 +1798,11 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
                     <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
                       {svc.season ? `${svc.season} · ` : ''}Sunday #{getSundayNumber(svc.service_date)}
                     </div>
+                    {lectionary[svc.service_date]?.[0] && (
+                      <div style={{ fontSize: '11.5px', color: '#1f6f78', fontWeight: 600, marginTop: '2px' }}>
+                        📖 {lectionary[svc.service_date][0].title}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
@@ -1813,6 +1844,65 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           onSaved={loadBulletinTemplates}
         />
       )}
+    </div>
+  )
+}
+
+// Shows the Revised Common Lectionary for the service date being edited,
+// with one-tap buttons to drop each reading into the Scripture list.
+function LectionaryPanel({ days, used, onUse }) {
+  if (days === null) {
+    return (
+      <div style={{ fontSize: '12.5px', color: 'var(--gray-400)', background: 'var(--gray-50, #f7f7f8)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+        📖 Pick a service date to see that day's lectionary readings.
+      </div>
+    )
+  }
+  if (days.length === 0) {
+    return (
+      <div style={{ fontSize: '12.5px', color: 'var(--gray-400)', background: 'var(--gray-50, #f7f7f8)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+        📖 No lectionary readings listed for this date.
+      </div>
+    )
+  }
+  return (
+    <div style={{ border: '1px solid #cfe5e7', background: '#f1f8f8', borderRadius: '10px', padding: '12px 14px', marginBottom: '14px' }}>
+      {days.map((d, di) => (
+        <div key={di} style={{ marginTop: di ? '12px' : 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: '#1f6f78' }}>
+              📖 {d.title}{d.lectionary_year ? ` · Year ${d.lectionary_year}` : ''}
+            </div>
+            {d.url && (
+              <a href={d.url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', fontWeight: 700, color: '#1f6f78' }}>Read texts ↗</a>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {(d.readings || []).map((r, ri) => {
+              const isUsed = used.includes(r)
+              return (
+                <button
+                  key={ri}
+                  type="button"
+                  disabled={isUsed}
+                  onClick={() => onUse(r)}
+                  title={isUsed ? 'Already in this service' : 'Add to Scripture Readings'}
+                  style={{
+                    fontSize: '12.5px', fontWeight: 600, padding: '5px 10px', borderRadius: '999px',
+                    border: '1px solid #1f6f78', cursor: isUsed ? 'default' : 'pointer',
+                    background: isUsed ? '#1f6f78' : 'white', color: isUsed ? 'white' : '#1f6f78',
+                  }}
+                >
+                  {isUsed ? '✓ ' : '+ '}{r}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '10px' }}>
+        Tap a reading to add it below. Revised Common Lectionary, courtesy of the Vanderbilt Divinity Library.
+      </div>
     </div>
   )
 }
