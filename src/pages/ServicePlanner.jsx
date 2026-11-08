@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { setUnsavedChanges, confirmDiscardChanges } from '../unsavedChanges.js'
 import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 import BulletinGenerateModal from '../components/BulletinGenerateModal.jsx'
@@ -497,6 +498,29 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
   ])
 
+  // ── Unsaved-changes tracking ──
+  // `baseline` is a snapshot of the editor right after it was opened or last saved.
+  // Anything different from it counts as unsaved.
+  const editorSnapshot = JSON.stringify({ form, serviceHymns, serviceScriptures })
+  const [baseline, setBaseline] = useState(null)
+  const [baselineNonce, setBaselineNonce] = useState(0)
+  useEffect(() => { if (baselineNonce) setBaseline(editorSnapshot) }, [baselineNonce]) // capture after the editor has loaded
+  const isDirty = view === 'edit' && baseline !== null && editorSnapshot !== baseline
+
+  useEffect(() => { setUnsavedChanges(isDirty) }, [isDirty])
+  useEffect(() => () => setUnsavedChanges(false), [])
+  useEffect(() => {
+    if (!isDirty) return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [isDirty])
+
+  function handleExit() {
+    if (isDirty && !confirmDiscardChanges()) return
+    setSaveStatus(null); setBaseline(null); setView('list')
+  }
+
   async function loadBulletinTemplates() {
     const { data } = await supabase.from('bulletin_templates').select('service_type, row_types')
     const map = {}
@@ -733,6 +757,7 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
       { reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 2, page_reference: '', is_gospel: false, reader: '' },
     ])
     setEditingService(null); setView('edit'); setSaveStatus(null); setGenerateHint(false)
+    setBaseline(null); setBaselineNonce(n => n + 1)
   }
 
   function startEdit(svc, hymnsList = hymns, templatesOverride = bulletinTemplates) {
@@ -793,10 +818,12 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
         : [{ reference: '', bible_version: 'CEB', is_call_and_response: false, call_response_text: '', sort_order: 1, page_reference: '', is_gospel: false, reader: '' }]
     )
     setEditingService(svc); setView('edit'); setSaveStatus(null); setGenerateHint(false)
+    setBaseline(null); setBaselineNonce(n => n + 1)
   }
 
   async function handleSave() {
     if (!form.service_date) return
+    const savingSnapshot = editorSnapshot // anything typed while saving still counts as unsaved
     setSaving(true); setSaveStatus(null)
     try {
       let serviceId
@@ -804,12 +831,15 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
         const { error } = await supabase.from('service_dates').update({ ...form }).eq('id', editingService.id)
         if (error) throw error
         serviceId = editingService.id
+        setEditingService(prev => ({ ...prev, ...form }))
         await supabase.from('service_hymns').delete().eq('service_date_id', serviceId)
         await supabase.from('service_scriptures').delete().eq('service_date_id', serviceId)
       } else {
         const { data, error } = await supabase.from('service_dates').insert([{ ...form }]).select().single()
         if (error) throw error
         serviceId = data.id
+        // Stay in the editor as this service, so the next Save updates it instead of creating a duplicate
+        setEditingService(data)
         await supabase.from('upload_tracker').insert(
           ['service','children','spark','music','special','podcast_spark','podcast_music']
             .map(t => ({ service_date_id: serviceId, upload_type: t, is_uploaded: false, podcast_published: false }))
@@ -827,8 +857,9 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
           validScriptures.map(s => ({ service_date_id: serviceId, reference: s.reference, bible_version: s.bible_version, is_call_and_response: s.is_call_and_response, call_response_text: s.call_response_text || null, sort_order: s.sort_order, page_reference: s.page_reference || null, is_gospel: s.is_gospel || false, reader: s.reader || null }))
         )
       }
-      setSaveStatus('success'); loadServices()
-      setTimeout(() => setView('list'), 800)
+      // Stay on this service after saving — only the Exit button goes back to the list
+      setSaveStatus('success'); setBaseline(savingSnapshot); loadServices()
+      setTimeout(() => setSaveStatus(s => (s === 'success' ? null : s)), 3000)
     } catch (err) { console.error(err); setSaveStatus(err.message || 'error') }
     setSaving(false)
   }
@@ -1217,17 +1248,23 @@ export default function ServicePlanner({ onViewService, editServiceId, onClearEd
     const seasonStyle = getSeasonStyle(form.liturgical_color)
     return (
       <div>
-        <div className="page-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button className="btn btn-secondary" onClick={() => setView('list')}>← Back</button>
-            <h1 className="page-title">{editingService ? `Edit: ${formatDate(editingService.service_date)}` : 'New Service'}</h1>
+        <div className="edit-header-sticky">
+          <div className="page-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button className="btn btn-secondary" onClick={handleExit}>← Exit</button>
+              <h1 className="page-title">{editingService ? `Edit: ${formatDate(editingService.service_date)}` : 'New Service'}</h1>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              {isDirty
+                ? <span style={{ color: '#B45309', fontWeight: 600, fontSize: '14px' }}>● Unsaved changes</span>
+                : saveStatus === 'success' && <span style={{ color: '#2D7A4F', fontWeight: 600, fontSize: '14px' }}>✓ Saved</span>}
+              <button className="btn btn-primary btn-lg" onClick={handleSave} disabled={!form.service_date || saving}>
+                {saving ? 'Saving…' : '💾 Save Service'}
+              </button>
+            </div>
           </div>
-          <button className="btn btn-primary btn-lg" onClick={handleSave} disabled={!form.service_date || saving}>
-            {saving ? 'Saving…' : '💾 Save Service'}
-          </button>
+          {saveStatus && saveStatus !== 'success' && <div className="alert alert-error" style={{ margin: '0', borderRadius: 0 }}>{saveStatus}</div>}
         </div>
-        {saveStatus === 'success' && <div className="alert alert-success" style={{ margin: '12px 28px 0' }}>✓ Saved!</div>}
-        {saveStatus && saveStatus !== 'success' && <div className="alert alert-error" style={{ margin: '12px 28px 0' }}>{saveStatus}</div>}
 
         <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

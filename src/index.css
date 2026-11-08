@@ -78,6 +78,9 @@ a { color: var(--burgundy); text-decoration: none; }
 .sidebar-backdrop { display: none; }
 .sidebar-close-btn { display: none; }
 
+/* Service editor: keep Exit / Save visible while scrolling long forms */
+.edit-header-sticky { position: sticky; top: 0; z-index: 80; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+
 @media print {
   .sidebar, .no-print { display: none !important; }
   .main-content { margin: 0; }
@@ -137,6 +140,7 @@ a { color: var(--burgundy); text-decoration: none; }
   .app-layout { display: block; }
   .main-content { margin-left: 0; }
   .page-header { padding: 16px; flex-wrap: wrap; }
+  .edit-header-sticky { top: 56px; } /* sits under the mobile top bar */
   .page-body { padding: 16px; }
   .sidebar {
     transform: translateX(-100%);

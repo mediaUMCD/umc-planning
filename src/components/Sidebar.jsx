@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { confirmDiscardChanges } from '../unsavedChanges.js'
 
 const NAV_ITEMS = [
   { id: 'dashboard', icon: '/icons/icon-dashboard.png', label: 'Dashboard' },
@@ -36,6 +37,7 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
   useEffect(() => { setMobileOpen(false) }, [page])
 
   async function handleLogout() {
+    if (!confirmDiscardChanges()) return
     await supabase.auth.signOut()
   }
 

@@ -16,6 +16,7 @@ import SetList from './pages/SetList.jsx'
 import ChristianEducation from './pages/ChristianEducation.jsx'
 import SeriesStudies from './pages/SeriesStudies.jsx'
 import Sidebar from './components/Sidebar.jsx'
+import { confirmDiscardChanges } from './unsavedChanges.js'
 
 const PUBLIC_PATHS = ['/setlist', '/setlist/']
 const APPROVE_PATHS = ['/approve', '/approve/']
@@ -129,7 +130,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} navigate={setPage} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} />
+      <Sidebar page={page} navigate={(p) => { if (p !== page && !confirmDiscardChanges()) return; setPage(p) }} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} />
       <div className="main-content">
         {renderPage()}
       </div>
