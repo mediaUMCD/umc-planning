@@ -15,6 +15,7 @@ import Approve from './pages/Approve.jsx'
 import SetList from './pages/SetList.jsx'
 import ChristianEducation from './pages/ChristianEducation.jsx'
 import SeriesStudies from './pages/SeriesStudies.jsx'
+import Attendance from './pages/Attendance.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import { confirmDiscardChanges } from './unsavedChanges.js'
 
@@ -118,6 +119,7 @@ export default function App() {
       case 'hymns': return <HymnTracker />
       case 'christian-education': return <ChristianEducation initialTarget={ceTarget} onConsumeTarget={() => setCeTarget(null)} />
       case 'series': return <SeriesStudies onOpenCE={navigateToCE} />
+      case 'attendance': return <Attendance />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
