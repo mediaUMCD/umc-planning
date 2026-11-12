@@ -210,6 +210,19 @@ function EventAttendance({ target, onBack }) {
   const byPerson = useMemo(() => Object.fromEntries(checkins.filter(c => c.person_id).map(c => [c.person_id, c])), [checkins])
   const pById = useMemo(() => Object.fromEntries(people.map(p => [p.id, p])), [people])
   const total = approved.length + (Number(guests) || 0)
+  const guestCheckins = approved.filter(c => !c.person_id && c.guest_name)
+
+  async function reloadCheckins() {
+    const { data, error } = await supabase.from('attendance_checkins').select('*').eq('attendance_event_id', ae.id)
+    if (error) return setError(error.message)
+    setCheckins(data || [])
+    const ids = new Set(people.map(p => p.id))
+    const missing = (data || []).filter(c => c.person_id && !ids.has(c.person_id)).map(c => c.person_id)
+    if (missing.length) {
+      const { data: more } = await supabase.from('people').select('id, first_name, last_name, preferred_name, email, person_type, family_id, is_active').in('id', missing)
+      if (more?.length) setPeople(ps => [...ps, ...more].sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
+    }
+  }
 
   async function syncHeadcount(nextCheckins, nextGuests = guests) {
     const named = nextCheckins.filter(c => c.status === 'approved').length
@@ -310,18 +323,14 @@ function EventAttendance({ target, onBack }) {
 
       {pending.length > 0 && (
         <div className="card" style={{ marginBottom: 14, borderColor: 'var(--warning)', background: 'var(--warning-light)' }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Checked themselves in — waiting for review ({pending.length})</div>
-          {pending.map(c => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
-              <span style={{ flex: 1 }}>{personName(pById[c.person_id]) || c.guest_name}</span>
-              <button className="btn btn-sm btn-primary" onClick={() => pById[c.person_id] && toggle(pById[c.person_id])}>Approve</button>
-              <button className="btn btn-sm btn-danger" onClick={async () => {
-                const { error } = await supabase.from('attendance_checkins').update({ status: 'declined' }).eq('id', c.id)
-                if (error) return setError(error.message)
-                setCheckins(cs => cs.map(x => x.id === c.id ? { ...x, status: 'declined' } : x))
-              }}>Decline</button>
-            </div>
-          ))}
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Checked themselves in — waiting for review ({pending.length})</div>
+          {pending.map(c => <SelfCheckinRow key={c.id} row={c} people={people} onDone={reloadCheckins} />)}
+        </div>
+      )}
+
+      {guestCheckins.length > 0 && (
+        <div className="card" style={{ marginBottom: 14, fontSize: 14 }}>
+          <b>Checked in as guests:</b> {guestCheckins.map(c => c.guest_name).join(', ')}
         </div>
       )}
 
@@ -396,52 +405,203 @@ function EventAttendance({ target, onBack }) {
   )
 }
 
+/* ------------------------------------------------------- self check-ins */
+
+// Church App check-ins arrive as "pending" with the name the person typed (guest_name).
+// The database fills person_id only when exactly one active person has that name.
+
+async function recountEvent(aeId) {
+  const [{ count }, { data: ev }] = await Promise.all([
+    supabase.from('attendance_checkins').select('id', { count: 'exact', head: true }).eq('attendance_event_id', aeId).eq('status', 'approved'),
+    supabase.from('attendance_events').select('guest_count').eq('id', aeId).single(),
+  ])
+  const g = ev?.guest_count ?? 0
+  return supabase.from('attendance_events').update({ guest_count: g, headcount: (count || 0) + g }).eq('id', aeId)
+}
+
+// Approve a self check-in as a person (personId) or as a guest (null). Returns an error message or ''.
+async function approveSelfCheckin(row, personId) {
+  if (personId) {
+    const { data: others, error } = await supabase.from('attendance_checkins').select('id, status')
+      .eq('attendance_event_id', row.attendance_event_id).eq('person_id', personId).neq('id', row.id)
+    if (error) return error.message
+    if ((others || []).some(o => o.status === 'approved')) {
+      // Already counted — this one is a duplicate.
+      const { error: e2 } = await supabase.from('attendance_checkins').delete().eq('id', row.id)
+      return e2 ? e2.message : ''
+    }
+    if ((others || []).length) {
+      const { error: e3 } = await supabase.from('attendance_checkins').delete().in('id', others.map(o => o.id))
+      if (e3) return e3.message
+    }
+  }
+  const { error } = await supabase.from('attendance_checkins').update({ person_id: personId || null, status: 'approved' }).eq('id', row.id)
+  if (error) return error.message
+  const { error: e4 } = await recountEvent(row.attendance_event_id)
+  return e4 ? e4.message : ''
+}
+
+const norm = (s) => (s || '').toLowerCase().replace(/[^a-z ]/g, '').trim()
+
+// People whose names look like what was typed, best first.
+function suggestPeople(typed, people) {
+  const words = norm(typed).split(/\s+/).filter(Boolean)
+  if (!words.length) return []
+  const first = words[0], last = words[words.length - 1]
+  return people.map(p => {
+    const ln = norm(p.last_name), fn = norm(p.first_name), pn = norm(p.preferred_name)
+    let score = 0
+    if (ln === last) score += 2; else if (ln.startsWith(last) || last.startsWith(ln)) score += 1
+    if (fn === first || pn === first) score += 2; else if ((fn && fn.startsWith(first)) || (pn && pn.startsWith(first))) score += 1
+    if (p.is_active) score += 0.5
+    return { p, score }
+  }).filter(x => x.score >= 2).sort((a, b) => b.score - a.score).slice(0, 5).map(x => x.p)
+}
+
+function SelfCheckinRow({ row, people, onDone, showEvent }) {
+  const pById = useMemo(() => Object.fromEntries(people.map(p => [p.id, p])), [people])
+  const [pick, setPick] = useState(row.person_id || '')
+  const [open, setOpen] = useState(!row.person_id)
+  const [q, setQ] = useState('')
+  const [adding, setAdding] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const suggestions = useMemo(() => suggestPeople(row.guest_name, people), [row.guest_name, people])
+  const needle = q.trim().toLowerCase()
+  const found = needle.length >= 2
+    ? people.filter(p => `${p.first_name} ${p.preferred_name || ''} ${p.last_name}`.toLowerCase().includes(needle)).slice(0, 8)
+    : []
+  const picked = pById[pick]
+
+  async function run(fn) {
+    setBusy(true); setError('')
+    const msg = await fn()
+    setBusy(false)
+    if (msg) setError(msg); else onDone(row)
+  }
+  const approve = (personId) => run(() => approveSelfCheckin(row, personId))
+  const decline = () => run(async () => {
+    const { error } = await supabase.from('attendance_checkins').update({ status: 'declined' }).eq('id', row.id)
+    return error ? error.message : ''
+  })
+  const addVisitor = () => run(async () => {
+    if (!adding.first_name.trim() || !adding.last_name.trim()) return 'First and last name are both needed.'
+    const { data, error } = await supabase.from('people').insert([{
+      first_name: adding.first_name.trim(), last_name: adding.last_name.trim(), person_type: 'visitor',
+    }]).select('id').single()
+    if (error) return error.message
+    return approveSelfCheckin(row, data.id)
+  })
+
+  const chip = (p) => (
+    <button key={p.id} className={`btn btn-sm ${pick === p.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setPick(p.id); setQ('') }}>
+      {personName(p)}{!p.is_active && ' (archived)'}
+    </button>
+  )
+
+  return (
+    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--gray-200)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div style={{ fontWeight: 600 }}>
+            “{row.guest_name || personName(pById[row.person_id])}”
+            {row.mode === 'online' && <span style={{ fontSize: 11, marginLeft: 6, padding: '2px 6px', borderRadius: 99, background: 'var(--burgundy-light)', color: 'var(--burgundy)' }}>online</span>}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--gray-600)' }}>
+            {showEvent && row.attendance_events && <>{row.attendance_events.event_name} · {fmtDate(row.attendance_events.event_date)} · </>}
+            {new Date(row.checked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+          </div>
+          <div style={{ fontSize: 13, marginTop: 2, color: picked ? 'var(--success)' : 'var(--warning)' }}>
+            {picked ? <>Matched to <b>{personName(picked)}</b>{!picked.is_active && ' (archived — restore on the People page)'}</> : 'Not matched to anyone yet'}
+            {picked && !open && <button className="btn btn-sm btn-secondary" style={{ marginLeft: 8, padding: '2px 8px' }} onClick={() => setOpen(true)}>Change</button>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button className="btn btn-sm btn-primary" disabled={busy || !pick} onClick={() => approve(pick)} style={{ opacity: pick ? 1 : 0.5 }}>Approve</button>
+          <button className="btn btn-sm btn-danger" disabled={busy} onClick={decline}>Decline</button>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius-sm)', padding: 10, marginTop: 8 }}>
+          {suggestions.length > 0 && <>
+            <div style={{ fontSize: 12, color: 'var(--gray-600)', marginBottom: 4 }}>Could be:</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>{suggestions.map(chip)}</div>
+          </>}
+          <input placeholder="Search everyone, including archived…" value={q} onChange={e => setQ(e.target.value)} style={{ fontSize: 16, marginBottom: found.length ? 6 : 8 }} />
+          {found.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>{found.map(chip)}</div>}
+          {adding ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input placeholder="First name" value={adding.first_name} onChange={e => setAdding({ ...adding, first_name: e.target.value })} style={{ flex: '1 1 120px', fontSize: 16 }} />
+              <input placeholder="Last name" value={adding.last_name} onChange={e => setAdding({ ...adding, last_name: e.target.value })} style={{ flex: '1 1 120px', fontSize: 16 }} />
+              <button className="btn btn-sm btn-primary" disabled={busy} onClick={addVisitor}>Add and approve</button>
+              <button className="btn btn-sm btn-secondary" onClick={() => setAdding(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-sm btn-secondary" onClick={() => {
+                const parts = (row.guest_name || '').trim().split(/\s+/)
+                setAdding({ first_name: parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '', last_name: parts.length > 1 ? parts[parts.length - 1] : '' })
+              }}>+ New visitor</button>
+              <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => approve(null)}>Count as guest (no record)</button>
+            </div>
+          )}
+        </div>
+      )}
+      {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 6 }}>{error}</div>}
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------ review queue */
 
 function ReviewQueue() {
   const [rows, setRows] = useState(null)
+  const [people, setPeople] = useState([])
   const [error, setError] = useState('')
+  const [bulk, setBulk] = useState(false)
   async function load() {
-    const { data, error } = await supabase.from('attendance_checkins')
-      .select('id, guest_name, checked_in_at, attendance_event_id, attendance_events(id, event_name, event_date, guest_count, headcount), people(first_name, last_name, preferred_name)')
-      .eq('status', 'pending').order('checked_in_at', { ascending: false })
-    if (error) setError(error.message)
+    const [{ data, error }, { data: ppl, error: e2 }] = await Promise.all([
+      supabase.from('attendance_checkins')
+        .select('id, person_id, guest_name, mode, checked_in_at, attendance_event_id, attendance_events(id, event_name, event_date)')
+        .eq('status', 'pending').order('checked_in_at', { ascending: false }),
+      supabase.from('people').select('id, first_name, last_name, preferred_name, is_active, person_type').or('person_type.is.null,person_type.neq.organization'),
+    ])
+    if (error || e2) setError((error || e2).message)
+    setPeople((ppl || []).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
     setRows(data || [])
   }
   useEffect(() => { load() }, [])
-  async function decide(row, status) {
-    const { error } = await supabase.from('attendance_checkins').update({ status }).eq('id', row.id)
-    if (error) return setError(error.message)
-    if (status === 'approved') {
-      const ev = row.attendance_events
-      const { count } = await supabase.from('attendance_checkins').select('id', { count: 'exact', head: true })
-        .eq('attendance_event_id', ev.id).eq('status', 'approved')
-      const g = ev.guest_count ?? 0
-      await supabase.from('attendance_events').update({ guest_count: g, headcount: (count || 0) + g }).eq('id', ev.id)
+  const done = (row) => setRows(rs => rs.filter(r => r.id !== row.id))
+  const matched = (rows || []).filter(r => r.person_id)
+
+  async function approveMatched() {
+    setBulk(true); setError('')
+    for (const r of matched) {
+      const msg = await approveSelfCheckin(r, r.person_id)
+      if (msg) { setError(msg); break }
+      done(r)
     }
-    setRows(rs => rs.filter(r => r.id !== row.id))
+    setBulk(false)
   }
+
   if (!rows) return <div className="spinner" />
   return (
     <div className="card">
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>Self check-ins waiting for review</div>
-      <div style={{ fontSize: 13, color: 'var(--gray-600)', marginBottom: 12 }}>When people check themselves in from the Church App, they show here until someone approves them.</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={{ flex: '1 1 260px' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Self check-ins waiting for review ({rows.length})</div>
+          <div style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+            People who tapped “I'm Here” in the Church App. Check the match, then Approve. If the name isn't matched,
+            pick the right person, add them as a new visitor, or count them as a guest.
+          </div>
+        </div>
+        {matched.length > 1 && <button className="btn btn-primary" disabled={bulk} onClick={approveMatched}>{bulk ? 'Approving…' : `Approve all ${matched.length} matched`}</button>}
+      </div>
       {error && <div style={{ color: 'var(--danger)', marginBottom: 8 }}>{error}</div>}
-      {rows.length === 0 ? <div style={{ color: 'var(--gray-600)' }}>Nothing to review.</div> : (
-        <table className="data-table">
-          <thead><tr><th>Person</th><th>Event</th><th>Checked in</th><th></th></tr></thead>
-          <tbody>{rows.map(r => (
-            <tr key={r.id}>
-              <td>{personName(r.people) || r.guest_name}</td>
-              <td>{r.attendance_events?.event_name}<div style={{ fontSize: 12, color: 'var(--gray-600)' }}>{r.attendance_events && fmtDate(r.attendance_events.event_date)}</div></td>
-              <td style={{ fontSize: 12 }}>{new Date(r.checked_in_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-              <td style={{ whiteSpace: 'nowrap' }}>
-                <button className="btn btn-sm btn-primary" onClick={() => decide(r, 'approved')}>Approve</button>{' '}
-                <button className="btn btn-sm btn-danger" onClick={() => decide(r, 'declined')}>Decline</button>
-              </td>
-            </tr>))}</tbody>
-        </table>
-      )}
+      {rows.length === 0
+        ? <div style={{ color: 'var(--gray-600)' }}>Nothing to review.</div>
+        : rows.map(r => <SelfCheckinRow key={r.id} row={r} people={people} onDone={done} showEvent />)}
     </div>
   )
 }
