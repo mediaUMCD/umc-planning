@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { id: 'hymns', icon: '/icons/icon-hymn-tracker.png', label: 'Hymn Tracker' },
   { id: 'series', icon: '📣', label: 'Series & Studies' },
   { id: 'christian-education', icon: '📚', label: 'Christian Education' },
+  { id: 'people', icon: '👥', label: 'People' },
   { id: 'attendance', icon: '✅', label: 'Attendance' },
   { id: 'uploads', icon: '/icons/icon-upload-tracker.png', label: 'Upload Tracker' },
   { id: 'import', icon: '/icons/icon-bulletin-import.png', label: 'Bulletin Import' },

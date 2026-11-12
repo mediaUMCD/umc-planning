@@ -1,0 +1,462 @@
+import { useEffect, useMemo, useState } from 'react'
+import { supabase } from '../lib/supabase.js'
+
+// People — the church's people records (imported from Breeze, Nov 2026).
+// Search and filter, edit a person, their family and tags, archive with a
+// reason and dates (never delete), restore, and see why people left by year.
+
+const TYPE_LABELS = { member: 'Member', guest: 'Guest', visitor: 'Visitor', child: 'Child', staff: 'Staff', organization: 'Organization' }
+const LEFT_LABELS = {
+  transfer_umc: 'Moved to another UMC church', transfer_other: 'Moved to another church', death: 'Deceased',
+  inactive: 'Deactivated', moved: 'Moved out of area', withdrawn: 'Withdrew', charge_conference: 'Removed by Charge Conference',
+  other: 'Other', unknown: 'Reason not recorded',
+}
+const COLS = 'id, first_name, last_name, preferred_name, middle_name, maiden_name, suffix, email, phone, home_phone, street, city, state, zip, birthdate, gender, marital_status, person_type, family_id, family_role, is_active, is_directory_opt_out, membership_date, umc_status, archive_category, archive_reason, membership_removed_date, deceased_date, archived_at, notes, breeze_id, breeze_extra'
+
+const display = (p) => `${p.last_name ? p.last_name + ', ' : ''}${p.preferred_name || p.first_name}`
+const today = () => new Date().toISOString().slice(0, 10)
+
+export default function People() {
+  const [tab, setTab] = useState('people')
+  const [people, setPeople] = useState(null)
+  const [families, setFamilies] = useState([])
+  const [tags, setTags] = useState([])
+  const [links, setLinks] = useState([]) // person_tags
+  const [error, setError] = useState('')
+  const [editing, setEditing] = useState(null) // person object or {new:true}
+
+  async function load() {
+    setError('')
+    const all = []
+    for (let from = 0; ; from += 1000) { // read past the 1000-row page limit
+      const { data, error } = await supabase.from('people').select(COLS).order('last_name').order('first_name').range(from, from + 999)
+      if (error) return setError(error.message)
+      all.push(...data); if (data.length < 1000) break
+    }
+    const [f, t, l] = await Promise.all([
+      supabase.from('families').select('id, family_name, address, primary_phone').order('family_name'),
+      supabase.from('tags').select('id, name, color').order('name'),
+      supabase.from('person_tags').select('person_id, tag_id'),
+    ])
+    const err = f.error || t.error || l.error
+    if (err) return setError(err.message)
+    setPeople(all); setFamilies(f.data); setTags(t.data); setLinks(l.data)
+  }
+  useEffect(() => { load() }, [])
+
+  function saved(p) {
+    setPeople(ps => {
+      const i = ps.findIndex(x => x.id === p.id)
+      return i === -1 ? [...ps, p].sort((a, b) => display(a).localeCompare(display(b))) : ps.map(x => x.id === p.id ? p : x)
+    })
+    setEditing(p)
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <div className="page-title">People</div>
+          <div style={{ fontSize: 13, color: 'var(--gray-600)', marginTop: 2 }}>Members, families and friends of UMCD</div>
+        </div>
+        {!editing && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className={`btn btn-sm ${tab === 'people' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('people')}>People</button>
+            <button className={`btn btn-sm ${tab === 'left' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('left')}>Why people left</button>
+          </div>
+        )}
+      </div>
+      <div className="page-body">
+        {error && <div className="card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</div>}
+        {!people ? (!error && <div className="spinner" />)
+          : editing ? (
+            <PersonEditor person={editing} families={families} setFamilies={setFamilies} tags={tags} setTags={setTags}
+              links={links} setLinks={setLinks} onSaved={saved} onClose={() => setEditing(null)} />
+          ) : tab === 'people' ? (
+            <PeopleList people={people} families={families} tags={tags} links={links} onOpen={setEditing}
+              onAdd={() => setEditing({ isNew: true, first_name: '', last_name: '', person_type: 'visitor', is_active: true, is_directory_opt_out: true })} />
+          ) : <WhyLeft people={people} />}
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ list */
+
+function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState('active')
+  const [type, setType] = useState('')
+  const [tag, setTag] = useState('')
+  const [quick, setQuick] = useState('')
+  const [limit, setLimit] = useState(100)
+
+  const famById = useMemo(() => Object.fromEntries(families.map(f => [f.id, f])), [families])
+  const tagById = useMemo(() => Object.fromEntries(tags.map(t => [t.id, t])), [tags])
+  const tagsOf = useMemo(() => {
+    const m = {}; for (const l of links) (m[l.person_id] ||= []).push(l.tag_id); return m
+  }, [links])
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return people.filter(p => {
+      if (status === 'active' && !p.is_active) return false
+      if (status === 'archived' && p.is_active) return false
+      if (!type && p.person_type === 'organization' && status !== 'all') return false
+      if (type && p.person_type !== type) return false
+      if (tag && !(tagsOf[p.id] || []).includes(tag)) return false
+      if (quick === 'noaddress' && (p.street || p.person_type === 'child' || p.person_type === 'organization')) return false
+      if (quick === 'noemail' && (p.email || p.person_type === 'organization')) return false
+      if (quick === 'directory' && (p.is_directory_opt_out || !p.is_active)) return false
+      if (needle) {
+        const hay = `${p.first_name} ${p.preferred_name || ''} ${p.last_name} ${p.email || ''} ${famById[p.family_id]?.family_name || ''}`.toLowerCase()
+        if (!hay.includes(needle)) return false
+      }
+      return true
+    })
+  }, [people, q, status, type, tag, quick, tagsOf, famById])
+
+  useEffect(() => { setLimit(100) }, [q, status, type, tag, quick])
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <input placeholder="Search by name, email or family…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: '1 1 240px', fontSize: 16 }} />
+          <button className="btn btn-primary" onClick={onAdd}>+ Add person</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+          <select value={status} onChange={e => setStatus(e.target.value)}>
+            <option value="active">Active</option><option value="archived">Archived</option><option value="all">Everyone</option>
+          </select>
+          <select value={type} onChange={e => setType(e.target.value)}>
+            <option value="">All kinds</option>
+            {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}s</option>)}
+          </select>
+          <select value={tag} onChange={e => setTag(e.target.value)}>
+            <option value="">Any tag</option>
+            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select value={quick} onChange={e => setQuick(e.target.value)}>
+            <option value="">No extra filter</option>
+            <option value="noaddress">No address</option>
+            <option value="noemail">No email</option>
+            <option value="directory">In the directory</option>
+          </select>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 13, color: 'var(--gray-600)', margin: '0 2px 8px' }}>{shown.length} {shown.length === 1 ? 'person' : 'people'}</div>
+
+      <div style={{ display: 'grid', gap: 6 }}>
+        {shown.slice(0, limit).map(p => (
+          <button key={p.id} onClick={() => onOpen(p)} className="card"
+            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', textAlign: 'left', opacity: p.is_active ? 1 : 0.75 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600 }}>{display(p)}{p.suffix ? ` ${p.suffix}` : ''}</div>
+              <div style={{ fontSize: 12, color: 'var(--gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {[TYPE_LABELS[p.person_type], famById[p.family_id]?.family_name && `${famById[p.family_id].family_name} family`, p.city].filter(Boolean).join(' · ')}
+              </div>
+              {(tagsOf[p.id] || []).length > 0 && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                  {tagsOf[p.id].map(id => tagById[id] && <span key={id} style={{ fontSize: 11, background: 'var(--burgundy-light)', color: 'var(--burgundy)', borderRadius: 10, padding: '1px 8px' }}>{tagById[id].name}</span>)}
+                </div>
+              )}
+            </div>
+            {!p.is_active && <span style={{ fontSize: 11, color: 'var(--gray-600)', textAlign: 'right', flex: 'none', maxWidth: 140 }}>Archived<br />{LEFT_LABELS[p.archive_category] || ''}</span>}
+          </button>
+        ))}
+      </div>
+      {shown.length > limit && <button className="btn btn-secondary" style={{ marginTop: 10, width: '100%' }} onClick={() => setLimit(l => l + 200)}>Show more ({shown.length - limit} left)</button>}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- editor */
+
+function Field({ label, children, wide }) {
+  return <div style={{ gridColumn: wide ? '1 / -1' : undefined }}><label className="form-label">{label}</label>{children}</div>
+}
+
+function PersonEditor({ person, families, setFamilies, tags, setTags, links, setLinks, onSaved, onClose }) {
+  const [f, setF] = useState(person)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [arch, setArch] = useState(null) // archive form
+  const [newTag, setNewTag] = useState('')
+  const [newFamily, setNewFamily] = useState('')
+  useEffect(() => { setF(person); setMsg(''); setErr(''); setArch(null) }, [person])
+
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : (e.target.value === '' ? null : e.target.value) })
+  const mine = links.filter(l => l.person_id === f.id).map(l => l.tag_id)
+
+  async function save(extra = {}) {
+    if (!f.first_name?.trim()) return setErr('A first name is needed.')
+    setSaving(true); setErr(''); setMsg('')
+    const row = { ...f, ...extra }
+    delete row.isNew; delete row.id; delete row.breeze_extra; delete row.breeze_id
+    row.first_name = row.first_name.trim(); row.last_name = (row.last_name || '').trim()
+    row.updated_at = new Date().toISOString()
+    let data, error
+    if (f.isNew) ({ data, error } = await supabase.from('people').insert([row]).select(COLS).single())
+    else ({ data, error } = await supabase.from('people').update(row).eq('id', f.id).select(COLS).single())
+    setSaving(false)
+    if (error) return setErr(error.message)
+    setMsg('Saved'); onSaved(data)
+    return data
+  }
+
+  async function addFamily() {
+    if (!newFamily.trim()) return
+    const { data, error } = await supabase.from('families').insert([{ family_name: newFamily.trim() }]).select('id, family_name, address, primary_phone').single()
+    if (error) return setErr(error.message)
+    setFamilies(fs => [...fs, data].sort((a, b) => a.family_name.localeCompare(b.family_name)))
+    setF({ ...f, family_id: data.id }); setNewFamily('')
+  }
+
+  async function toggleTag(tagId) {
+    if (f.isNew) return setErr('Save the person first, then add tags.')
+    if (mine.includes(tagId)) {
+      const { error } = await supabase.from('person_tags').delete().eq('person_id', f.id).eq('tag_id', tagId)
+      if (error) return setErr(error.message)
+      setLinks(ls => ls.filter(l => !(l.person_id === f.id && l.tag_id === tagId)))
+    } else {
+      const { error } = await supabase.from('person_tags').insert([{ person_id: f.id, tag_id: tagId }])
+      if (error) return setErr(error.message)
+      setLinks(ls => [...ls, { person_id: f.id, tag_id: tagId }])
+    }
+  }
+
+  async function createTag() {
+    if (!newTag.trim()) return
+    const { data, error } = await supabase.from('tags').insert([{ name: newTag.trim() }]).select().single()
+    if (error) return setErr(error.message)
+    setTags(ts => [...ts, data].sort((a, b) => a.name.localeCompare(b.name))); setNewTag('')
+    await toggleTag(data.id)
+  }
+
+  async function archive() {
+    if (!arch.category) return setErr('Choose why they are no longer active.')
+    await save({
+      is_active: false, is_directory_opt_out: true, archived_at: new Date().toISOString(),
+      archive_category: arch.category, archive_reason: arch.note || null,
+      membership_removed_date: arch.removed || null,
+      deceased_date: arch.category === 'death' ? (arch.deceased || null) : f.deceased_date,
+    })
+    setArch(null)
+  }
+
+  async function restore() {
+    await save({ is_active: true, archived_at: null, archive_category: null, archive_reason: null, membership_removed_date: null })
+  }
+
+  const fam = families.find(x => x.id === f.family_id)
+  const extra = f.breeze_extra || {}
+
+  return (
+    <div>
+      <button className="btn btn-sm btn-secondary" onClick={onClose} style={{ marginBottom: 12 }}>← All people</button>
+
+      <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, color: 'var(--burgundy)' }}>
+            {f.isNew ? 'New person' : `${f.preferred_name || f.first_name} ${f.last_name}`}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+            {f.is_active ? (TYPE_LABELS[f.person_type] || '') : `Archived · ${LEFT_LABELS[f.archive_category] || 'Reason not recorded'}`}
+          </div>
+        </div>
+        {msg && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 13 }}>✓ {msg}</span>}
+        <button className="btn btn-primary" disabled={saving} onClick={() => save()}>{saving ? 'Saving…' : f.isNew ? 'Add person' : 'Save'}</button>
+      </div>
+      {err && <div className="card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{err}</div>}
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Name</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+          <Field label="First name"><input value={f.first_name || ''} onChange={set('first_name')} /></Field>
+          <Field label="Goes by"><input value={f.preferred_name || ''} onChange={set('preferred_name')} placeholder="Nickname" /></Field>
+          <Field label="Middle name"><input value={f.middle_name || ''} onChange={set('middle_name')} /></Field>
+          <Field label="Last name"><input value={f.last_name || ''} onChange={set('last_name')} /></Field>
+          <Field label="Suffix"><input value={f.suffix || ''} onChange={set('suffix')} placeholder="Jr., Sr." /></Field>
+          <Field label="Maiden name"><input value={f.maiden_name || ''} onChange={set('maiden_name')} /></Field>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Contact</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+          <Field label="Mobile phone"><input type="tel" value={f.phone || ''} onChange={set('phone')} /></Field>
+          <Field label="Home phone"><input type="tel" value={f.home_phone || ''} onChange={set('home_phone')} /></Field>
+          <Field label="Email"><input type="email" value={f.email || ''} onChange={set('email')} /></Field>
+          <Field label="Street" wide><input value={f.street || ''} onChange={set('street')} /></Field>
+          <Field label="City"><input value={f.city || ''} onChange={set('city')} /></Field>
+          <Field label="State"><input value={f.state || ''} onChange={set('state')} maxLength={2} /></Field>
+          <Field label="ZIP"><input value={f.zip || ''} onChange={set('zip')} inputMode="numeric" /></Field>
+        </div>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, fontSize: 14 }}>
+          <input type="checkbox" checked={!f.is_directory_opt_out} onChange={e => setF({ ...f, is_directory_opt_out: !e.target.checked })} />
+          Show in the Church App directory (members and staff only)
+        </label>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Church</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+          <Field label="Kind">
+            <select value={f.person_type} onChange={set('person_type')}>{Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          </Field>
+          <Field label="UMC status">
+            <select value={f.umc_status || ''} onChange={set('umc_status')}>
+              <option value="">—</option><option>Full Member</option><option>Constituent</option><option>Conference Member</option><option>Affiliate Member</option>
+            </select>
+          </Field>
+          <Field label="Membership date"><input type="date" value={f.membership_date || ''} onChange={set('membership_date')} /></Field>
+          <Field label="Birthdate"><input type="date" value={f.birthdate || ''} onChange={set('birthdate')} /></Field>
+          <Field label="Gender"><select value={f.gender || ''} onChange={set('gender')}><option value="">—</option><option>Female</option><option>Male</option></select></Field>
+          <Field label="Marital status"><select value={f.marital_status || ''} onChange={set('marital_status')}><option value="">—</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></Field>
+          <Field label="Notes" wide><textarea rows={2} value={f.notes || ''} onChange={set('notes')} /></Field>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Family</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+          <Field label="Family">
+            <select value={f.family_id || ''} onChange={set('family_id')}>
+              <option value="">— not in a family —</option>
+              {families.map(x => <option key={x.id} value={x.id}>{x.family_name}{x.address ? ` · ${x.address.split(',')[0]}` : ''}</option>)}
+            </select>
+          </Field>
+          <Field label="Role in family">
+            <select value={f.family_role || ''} onChange={set('family_role')}>
+              <option value="">—</option><option>Head of Household</option><option>Spouse</option><option>Adult</option><option>Child</option>
+            </select>
+          </Field>
+          <Field label="Start a new family">
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input value={newFamily} onChange={e => setNewFamily(e.target.value)} placeholder="Family name" />
+              <button className="btn btn-secondary btn-sm" onClick={addFamily}>Add</button>
+            </div>
+          </Field>
+        </div>
+        {fam?.address && <div style={{ fontSize: 13, color: 'var(--gray-600)', marginTop: 8 }}>Family address: {fam.address}</div>}
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Tags</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {tags.map(t => {
+            const on = mine.includes(t.id)
+            return <button key={t.id} onClick={() => toggleTag(t.id)} style={{ fontSize: 13, padding: '5px 12px', borderRadius: 14,
+              border: `1.5px solid ${on ? 'var(--burgundy)' : 'var(--gray-200)'}`, background: on ? 'var(--burgundy)' : 'var(--white)', color: on ? 'white' : 'var(--gray-800)' }}>{on ? '✓ ' : ''}{t.name}</button>
+          })}
+        </div>
+        <div style={{ display: 'flex', gap: 6, maxWidth: 360 }}>
+          <input value={newTag} onChange={e => setNewTag(e.target.value)} placeholder="New tag, e.g. Away for now" />
+          <button className="btn btn-secondary btn-sm" onClick={createTag}>Add tag</button>
+        </div>
+      </div>
+
+      {!f.isNew && (
+        <div className="card" style={{ marginBottom: 14, borderColor: f.is_active ? 'var(--gray-200)' : 'var(--warning)' }}>
+          {f.is_active ? (!arch ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, fontSize: 14, color: 'var(--gray-600)' }}>No longer coming? Archive them. Nothing is deleted, and you can restore them any time.</div>
+              <button className="btn btn-secondary" onClick={() => setArch({ category: '', removed: today(), deceased: '', note: '' })}>Archive…</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 10 }}>Archive {f.first_name}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                <Field label="Membership status">
+                  <select value={arch.category} onChange={e => setArch({ ...arch, category: e.target.value })}>
+                    <option value="">Choose…</option>
+                    {Object.entries(LEFT_LABELS).filter(([k]) => k !== 'unknown').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </Field>
+                <Field label="Date removed from membership"><input type="date" value={arch.removed} onChange={e => setArch({ ...arch, removed: e.target.value })} /></Field>
+                {arch.category === 'death' && <Field label="Date deceased"><input type="date" value={arch.deceased} onChange={e => setArch({ ...arch, deceased: e.target.value })} /></Field>}
+                <Field label="Note (optional)" wide><input value={arch.note} onChange={e => setArch({ ...arch, note: e.target.value })} placeholder="e.g. Joined Putnam UMC" /></Field>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-primary" onClick={archive} disabled={saving}>Archive</button>
+                <button className="btn btn-secondary" onClick={() => setArch(null)}>Cancel</button>
+              </div>
+            </div>
+          )) : (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 10 }}>Archived</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                <Field label="Membership status">
+                  <select value={f.archive_category || 'unknown'} onChange={e => setF({ ...f, archive_category: e.target.value })}>
+                    {Object.entries(LEFT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </Field>
+                <Field label="Date removed from membership"><input type="date" value={f.membership_removed_date || ''} onChange={set('membership_removed_date')} /></Field>
+                {f.archive_category === 'death' && <Field label="Date deceased"><input type="date" value={f.deceased_date || ''} onChange={set('deceased_date')} /></Field>}
+                <Field label="Note" wide><input value={f.archive_reason || ''} onChange={set('archive_reason')} /></Field>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={() => save()} disabled={saving}>Save changes</button>
+                <button className="btn btn-secondary" onClick={restore} disabled={saving}>Restore as active</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {Object.keys(extra).length > 0 && (
+        <details className="card" style={{ marginBottom: 14 }}>
+          <summary style={{ fontWeight: 600, cursor: 'pointer' }}>More from Breeze ({Object.keys(extra).length})</summary>
+          <table className="data-table" style={{ marginTop: 8 }}>
+            <tbody>{Object.entries(extra).map(([k, v]) => <tr key={k}><td style={{ color: 'var(--gray-600)', width: '40%' }}>{k}</td><td>{v}</td></tr>)}</tbody>
+          </table>
+        </details>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------- why people left */
+
+function WhyLeft({ people }) {
+  const [year, setYear] = useState('all')
+  const left = people.filter(p => !p.is_active && p.person_type !== 'organization')
+  const yearOf = (p) => (p.deceased_date || p.membership_removed_date || '').slice(0, 4) || null
+  const years = [...new Set(left.map(yearOf).filter(Boolean))].sort().reverse()
+  const inYear = year === 'all' ? left : year === 'none' ? left.filter(p => !yearOf(p)) : left.filter(p => yearOf(p) === year)
+  const counts = {}
+  for (const p of inYear) counts[p.archive_category || 'unknown'] = (counts[p.archive_category || 'unknown'] || 0) + 1
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1])
+
+  return (
+    <div>
+      <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ width: 200 }}><label className="form-label">Year they left</label>
+          <select value={year} onChange={e => setYear(e.target.value)}>
+            <option value="all">All years</option>
+            {years.map(y => <option key={y}>{y}</option>)}
+            <option value="none">No date recorded</option>
+          </select></div>
+        <div style={{ fontSize: 13, color: 'var(--gray-600)', flex: 1 }}>{inYear.length} people · {people.filter(p => p.is_active && p.person_type !== 'organization').length} active now</div>
+      </div>
+      <div className="card" style={{ overflowX: 'auto' }}>
+        {rows.length === 0 ? <div style={{ color: 'var(--gray-600)' }}>No one left in this period.</div> : (
+          <table className="data-table">
+            <thead><tr><th>Reason</th><th style={{ textAlign: 'right' }}>People</th><th style={{ textAlign: 'right' }}>Members</th></tr></thead>
+            <tbody>{rows.map(([k, n]) => (
+              <tr key={k}><td>{LEFT_LABELS[k] || k}</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{n}</td>
+                <td style={{ textAlign: 'right' }}>{inYear.filter(p => (p.archive_category || 'unknown') === k && (p.person_type === 'member' || p.umc_status)).length}</td></tr>))}</tbody>
+          </table>
+        )}
+      </div>
+      {counts.unknown > 0 && (
+        <div style={{ fontSize: 13, color: 'var(--gray-600)', marginTop: 10 }}>
+          "Reason not recorded" means Breeze archived them without a reason. Open a person on the People tab to fill it in.
+        </div>
+      )}
+    </div>
+  )
+}

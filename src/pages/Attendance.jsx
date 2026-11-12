@@ -174,6 +174,9 @@ function EventAttendance({ target, onBack }) {
   const [error, setError] = useState('')
   const [signups, setSignups] = useState(null)
   const [newPerson, setNewPerson] = useState(null)
+  const [tags, setTags] = useState([])
+  const [links, setLinks] = useState([])
+  const [onlyTag, setOnlyTag] = useState('')
 
   // Make sure there's an attendance record for this event, then load it.
   useEffect(() => { (async () => {
@@ -189,6 +192,8 @@ function EventAttendance({ target, onBack }) {
       if (error) return setError(error.message)
       rec = data
     }
+    supabase.from('tags').select('id, name').order('name').then(({ data }) => setTags(data || []))
+    supabase.from('person_tags').select('person_id, tag_id').then(({ data }) => setLinks(data || []))
     const [{ data: full, error: e1 }, { data: ppl, error: e2 }, { data: ci, error: e3 }] = await Promise.all([
       supabase.from('attendance_events').select('*').eq('id', rec.id).single(),
       supabase.from('people').select('id, first_name, last_name, preferred_name, email, person_type, family_id, is_active').eq('is_active', true),
@@ -270,9 +275,9 @@ function EventAttendance({ target, onBack }) {
   if (!ae) return <div className="spinner" />
 
   const needle = q.trim().toLowerCase()
-  const shown = needle
-    ? people.filter(p => `${p.first_name} ${p.preferred_name || ''} ${p.last_name}`.toLowerCase().includes(needle))
-    : people
+  const inTag = onlyTag ? new Set(links.filter(l => l.tag_id === onlyTag).map(l => l.person_id)) : null
+  const shown = people.filter(p => p.person_type !== 'organization' && (!inTag || inTag.has(p.id))
+    && (!needle || `${p.first_name} ${p.preferred_name || ''} ${p.last_name}`.toLowerCase().includes(needle)))
 
   return (
     <div>
@@ -326,6 +331,12 @@ function EventAttendance({ target, onBack }) {
           {ae.calendar_event_id && <button className="btn btn-secondary" onClick={loadSignups}>From sign-ups</button>}
           <button className="btn btn-secondary" onClick={() => setNewPerson({ first_name: '', last_name: '', email: '' })}>+ New person</button>
         </div>
+        {tags.length > 0 && (
+          <select value={onlyTag} onChange={e => setOnlyTag(e.target.value)} style={{ marginBottom: 12, maxWidth: 320 }}>
+            <option value="">Show everyone</option>
+            {tags.map(t => <option key={t.id} value={t.id}>Show only: {t.name}</option>)}
+          </select>
+        )}
 
         {newPerson && (
           <div style={{ background: 'var(--gray-50)', padding: 12, borderRadius: 'var(--radius-sm)', marginBottom: 12 }}>

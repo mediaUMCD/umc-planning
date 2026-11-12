@@ -16,6 +16,7 @@ import SetList from './pages/SetList.jsx'
 import ChristianEducation from './pages/ChristianEducation.jsx'
 import SeriesStudies from './pages/SeriesStudies.jsx'
 import Attendance from './pages/Attendance.jsx'
+import People from './pages/People.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import { confirmDiscardChanges } from './unsavedChanges.js'
 
@@ -120,6 +121,7 @@ export default function App() {
       case 'christian-education': return <ChristianEducation initialTarget={ceTarget} onConsumeTarget={() => setCeTarget(null)} />
       case 'series': return <SeriesStudies onOpenCE={navigateToCE} />
       case 'attendance': return <Attendance />
+      case 'people': return <People />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
