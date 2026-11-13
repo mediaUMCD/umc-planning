@@ -112,7 +112,7 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
       if (quick === 'directory' && (p.is_directory_opt_out || !p.is_active)) return false
       if (quick === 'moved' && !['moved', 'moved_no_forwarding'].includes(p.address_status)) return false
       if (quick === 'badaddr' && !['undeliverable', 'vacant', 'moved_no_forwarding'].includes(p.address_status)) return false
-      if (quick === 'rolls' && (p.is_active || !p.umc_status || p.person_type === 'organization' || p.membership_removed_date)) return false
+      if (quick === 'rolls' && (p.is_active || !['Full Member', 'Constituent', 'Reinstated Member', 'Affiliate Member'].includes(p.umc_status) || p.person_type === 'organization')) return false
       if (needle) {
         const hay = `${p.first_name} ${p.preferred_name || ''} ${p.last_name} ${p.email || ''} ${famById[p.family_id]?.family_name || ''}`.toLowerCase()
         if (!hay.includes(needle)) return false
@@ -149,7 +149,7 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
             <option value="directory">In the directory</option>
             <option value="moved">Moved (address check)</option>
             <option value="badaddr">Bad address (address check)</option>
-            <option value="rolls">Archived but still has a UMC status</option>
+            <option value="rolls">Archived but still on the rolls</option>
           </select>
         </div>
       </div>
