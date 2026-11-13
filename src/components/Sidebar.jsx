@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { id: 'check-requests', icon: '/icons/icon-upload-tracker.png', label: 'Check Requests' },
 ]
 
+const GIVING_ITEM = { id: 'giving', icon: '💵', label: 'Giving' }
 const FUNDRAISING_ITEM = { id: 'fundraising', icon: '💰', label: 'Fundraising' }
 
 const FINANCE_ONLY_NAV_ITEMS = [
@@ -31,7 +32,7 @@ const OTHER_APPS = [
   { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
 
-export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising, canAttendance }) {
+export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising, canAttendance, canGiving, isCounterOnly }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // Close the menu automatically after navigating — this app uses internal
@@ -43,9 +44,10 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
     await supabase.auth.signOut()
   }
 
-  const items = isFinanceOnly
-    ? (canAttendance ? [...FINANCE_ONLY_NAV_ITEMS, ...NAV_ITEMS.filter(i => i.id === 'attendance' || i.id === 'people')] : FINANCE_ONLY_NAV_ITEMS)
-    : canFundraising ? [...NAV_ITEMS, FUNDRAISING_ITEM] : NAV_ITEMS
+  const items = isCounterOnly ? [GIVING_ITEM]
+    : isFinanceOnly
+    ? (canAttendance ? [...FINANCE_ONLY_NAV_ITEMS, GIVING_ITEM, ...NAV_ITEMS.filter(i => i.id === 'attendance' || i.id === 'people')] : [...FINANCE_ONLY_NAV_ITEMS, GIVING_ITEM])
+    : [...NAV_ITEMS, ...(canGiving ? [GIVING_ITEM] : []), ...(canFundraising ? [FUNDRAISING_ITEM] : [])]
 
   return (
     <>

@@ -17,6 +17,7 @@ import ChristianEducation from './pages/ChristianEducation.jsx'
 import SeriesStudies from './pages/SeriesStudies.jsx'
 import Attendance from './pages/Attendance.jsx'
 import People from './pages/People.jsx'
+import Giving from './pages/Giving.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import { confirmDiscardChanges } from './unsavedChanges.js'
 
@@ -65,13 +66,18 @@ export default function App() {
   const isFinanceOnly = roles.includes('finance') && !isAdmin
   const canFundraising = isAdmin || roles.includes('fundraising')
   const canAttendance = isAdmin || roles.includes('attendance')
+  const canReviewGiving = isAdmin || roles.includes('finance') || roles.includes('giving')
+  const canGiving = canReviewGiving || roles.includes('counter')
+  // Counters who have no other staff role only ever see the Giving page.
+  const isCounterOnly = roles.includes('counter') && !isAdmin && !roles.some(r => ['finance', 'giving', 'attendance', 'chair', 'teacher', 'fundraising'].includes(r))
 
   // Finance-only logins are scoped to Check Requests (plus Attendance and
   // People when they also take attendance), everywhere else.
-  const financeOnlyPages = canAttendance ? ['check-requests', 'attendance', 'people'] : ['check-requests']
+  const financeOnlyPages = canAttendance ? ['check-requests', 'giving', 'attendance', 'people'] : ['check-requests', 'giving']
   useEffect(() => {
     if (isFinanceOnly && !financeOnlyPages.includes(page)) setPage('check-requests')
-  }, [isFinanceOnly, page, canAttendance])
+    if (isCounterOnly && page !== 'giving') setPage('giving')
+  }, [isFinanceOnly, isCounterOnly, page, canAttendance])
 
   if (authLoading || (session && !rolesLoaded)) {
     return (
@@ -102,6 +108,8 @@ export default function App() {
   }
 
   const renderPage = () => {
+    if (isCounterOnly) return <Giving canReview={false} />
+    if (isFinanceOnly && page === 'giving') return <Giving canReview />
     if (isFinanceOnly) return page === 'attendance' && canAttendance ? <Attendance /> : page === 'people' && canAttendance ? <People /> : <CheckRequests />
 
     switch (page) {
@@ -125,6 +133,7 @@ export default function App() {
       case 'series': return <SeriesStudies onOpenCE={navigateToCE} />
       case 'attendance': return <Attendance />
       case 'people': return <People />
+      case 'giving': return canGiving ? <Giving canReview={canReviewGiving} /> : <Dashboard navigate={setPage} />
       case 'uploads': return <UploadTracker />
       case 'import': return <BulletinImport />
       case 'bulletin-settings': return <BulletinSettings />
@@ -137,7 +146,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} navigate={(p) => { if (p !== page && !confirmDiscardChanges()) return; setPage(p) }} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} canAttendance={canAttendance} />
+      <Sidebar page={page} navigate={(p) => { if (p !== page && !confirmDiscardChanges()) return; setPage(p) }} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} canAttendance={canAttendance} canGiving={canGiving} isCounterOnly={isCounterOnly} />
       <div className="main-content">
         {renderPage()}
       </div>
