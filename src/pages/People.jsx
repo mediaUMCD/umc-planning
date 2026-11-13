@@ -76,6 +76,7 @@ export default function People() {
               links={links} setLinks={setLinks} onSaved={saved} onClose={() => setEditing(null)} />
           ) : tab === 'people' ? (
             <PeopleList people={people} families={families} tags={tags} links={links} onOpen={setEditing}
+              onBulkSaved={(rows) => setPeople(ps => { const m = Object.fromEntries(rows.map(r => [r.id, r])); return ps.map(p => m[p.id] || p) })}
               onAdd={() => setEditing({ isNew: true, first_name: '', last_name: '', person_type: 'visitor', is_active: true, is_directory_opt_out: true })} />
           ) : <WhyLeft people={people} />}
       </div>
@@ -85,7 +86,9 @@ export default function People() {
 
 /* ------------------------------------------------------------------ list */
 
-function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
+function PeopleList({ people, families, tags, links, onOpen, onAdd, onBulkSaved }) {
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState(() => new Set())
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('active')
   const [type, setType] = useState('')
@@ -157,12 +160,23 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 2px 8px' }}>
         <div style={{ fontSize: 13, color: 'var(--gray-600)', flex: 1 }}>{shown.length} {shown.length === 1 ? 'person' : 'people'}</div>
         {shown.length > 0 && <button className="btn btn-sm btn-secondary" onClick={() => downloadList(shown, famById)}>⬇ Download this list</button>}
+        <button className={`btn btn-sm ${picking ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setPicking(v => !v); setPicked(new Set()) }}>{picking ? 'Done selecting' : 'Select several'}</button>
       </div>
+
+      {picking && (
+        <BulkPanel picked={people.filter(p => picked.has(p.id))} shown={shown}
+          onPickAll={() => setPicked(new Set(shown.map(p => p.id)))} onClear={() => setPicked(new Set())}
+          onSaved={(rows) => { onBulkSaved(rows); setPicked(new Set()) }} />
+      )}
 
       <div style={{ display: 'grid', gap: 6 }}>
         {shown.slice(0, limit).map(p => (
-          <button key={p.id} onClick={() => onOpen(p)} className="card"
-            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', textAlign: 'left', opacity: p.is_active ? 1 : 0.75 }}>
+          <button key={p.id} className="card"
+            onClick={() => picking ? setPicked(s => { const n = new Set(s); n.has(p.id) ? n.delete(p.id) : n.add(p.id); return n }) : onOpen(p)}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', textAlign: 'left', opacity: p.is_active ? 1 : 0.75,
+              borderColor: picking && picked.has(p.id) ? 'var(--burgundy)' : undefined, background: picking && picked.has(p.id) ? 'var(--burgundy-light)' : undefined }}>
+            {picking && <span style={{ width: 22, height: 22, borderRadius: 5, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              border: `2px solid ${picked.has(p.id) ? 'var(--burgundy)' : 'var(--gray-400)'}`, background: picked.has(p.id) ? 'var(--burgundy)' : 'transparent', color: 'white', fontWeight: 700 }}>{picked.has(p.id) ? '✓' : ''}</span>}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>{display(p)}{p.suffix ? ` ${p.suffix}` : ''}</div>
               <div style={{ fontSize: 12, color: 'var(--gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -179,6 +193,65 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
         ))}
       </div>
       {shown.length > limit && <button className="btn btn-secondary" style={{ marginTop: 10, width: '100%' }} onClick={() => setLimit(l => l + 200)}>Show more ({shown.length - limit} left)</button>}
+    </div>
+  )
+}
+
+// Update membership status for several people at once (e.g. after the
+// Charge Conference removes people from the rolls). Each person's old UMC
+// status is kept in their note, so nothing is lost.
+function BulkPanel({ picked, shown, onPickAll, onClear, onSaved }) {
+  const [f, setF] = useState({ category: '', removed: new Date().toISOString().slice(0, 10), note: '', clearUmc: true })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  async function apply() {
+    if (!f.category) return setErr('Choose a membership status.')
+    if (!picked.length) return setErr('Tap the people you want to update first.')
+    if (!window.confirm(`Update ${picked.length} ${picked.length === 1 ? 'person' : 'people'} to "${LEFT_LABELS[f.category]}"?`)) return
+    setBusy(true); setErr(''); setMsg('')
+    const saved = []
+    for (const p of picked) {
+      const notes = [p.archive_reason, f.note, f.clearUmc && p.umc_status ? `Was ${p.umc_status}` : ''].filter(Boolean)
+      const row = {
+        is_active: false, is_directory_opt_out: true, archived_at: p.archived_at || new Date().toISOString(),
+        archive_category: f.category, membership_removed_date: f.removed || null,
+        archive_reason: [...new Set(notes)].join(' · ') || null, updated_at: new Date().toISOString(),
+      }
+      if (f.clearUmc) row.umc_status = null
+      const { data, error } = await supabase.from('people').update(row).eq('id', p.id).select(COLS).single()
+      if (error) { setBusy(false); setErr(`Stopped at ${p.first_name} ${p.last_name}: ${error.message}`); if (saved.length) onSaved(saved); return }
+      saved.push(data)
+    }
+    setBusy(false); setMsg(`Updated ${saved.length} ${saved.length === 1 ? 'person' : 'people'}.`); onSaved(saved)
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 12, borderColor: 'var(--burgundy)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div style={{ fontWeight: 600, flex: 1 }}>{picked.length} selected</div>
+        <button className="btn btn-sm btn-secondary" onClick={onPickAll}>Select all {shown.length} shown</button>
+        <button className="btn btn-sm btn-secondary" onClick={onClear}>Clear</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+        <div><label className="form-label">Membership status</label>
+          <select value={f.category} onChange={e => setF({ ...f, category: e.target.value })}>
+            <option value="">Choose…</option>
+            {Object.entries(LEFT_LABELS).filter(([k]) => k !== 'unknown').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select></div>
+        <div><label className="form-label">Date removed from membership</label>
+          <input type="date" value={f.removed} onChange={e => setF({ ...f, removed: e.target.value })} /></div>
+        <div style={{ gridColumn: '1 / -1' }}><label className="form-label">Note (optional, added to each person)</label>
+          <input value={f.note} onChange={e => setF({ ...f, note: e.target.value })} placeholder="e.g. Charge Conference, Nov 2026" /></div>
+      </div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, fontSize: 14 }}>
+        <input type="checkbox" style={{ width: 'auto', flex: 'none' }} checked={f.clearUmc} onChange={e => setF({ ...f, clearUmc: e.target.checked })} />
+        Take them off the membership rolls (clears UMC status; the old status is saved in their note)
+      </label>
+      {err && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{err}</div>}
+      {msg && <div style={{ color: 'var(--success)', fontSize: 13, fontWeight: 600, marginTop: 8 }}>✓ {msg}</div>}
+      <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy} onClick={apply}>{busy ? 'Updating…' : `Update ${picked.length} selected`}</button>
     </div>
   )
 }
@@ -329,7 +402,7 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
           <Field label="ZIP"><input value={f.zip || ''} onChange={set('zip')} inputMode="numeric" /></Field>
         </div>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, fontSize: 14 }}>
-          <input type="checkbox" checked={!f.is_directory_opt_out} onChange={e => setF({ ...f, is_directory_opt_out: !e.target.checked })} />
+          <input type="checkbox" style={{ width: 'auto', flex: 'none' }} checked={!f.is_directory_opt_out} onChange={e => setF({ ...f, is_directory_opt_out: !e.target.checked })} />
           Show in the Church App directory (members and staff only)
         </label>
       </div>
