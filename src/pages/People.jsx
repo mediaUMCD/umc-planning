@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import ExcelJS from 'exceljs'
 import { supabase } from '../lib/supabase.js'
 
 // People — the church's people records (imported from Breeze, Nov 2026).
@@ -11,7 +12,8 @@ const LEFT_LABELS = {
   inactive: 'Deactivated', moved: 'Moved out of area', withdrawn: 'Withdrew', charge_conference: 'Removed by Charge Conference',
   other: 'Other', unknown: 'Reason not recorded',
 }
-const COLS = 'id, first_name, last_name, preferred_name, middle_name, maiden_name, suffix, email, phone, home_phone, street, city, state, zip, birthdate, gender, marital_status, person_type, family_id, family_role, is_active, is_directory_opt_out, membership_date, umc_status, archive_category, archive_reason, membership_removed_date, deceased_date, archived_at, notes, breeze_id, breeze_extra'
+const ADDR_LABELS = { ok: 'Address checked OK', moved: 'Moved (new address found)', moved_no_forwarding: 'Moved, no forwarding address', undeliverable: 'Address not deliverable', vacant: 'Address vacant / box closed' }
+const COLS = 'address_status, previous_address, moved_on, address_checked_at, id, first_name, last_name, preferred_name, middle_name, maiden_name, suffix, email, phone, home_phone, street, city, state, zip, birthdate, gender, marital_status, person_type, family_id, family_role, is_active, is_directory_opt_out, membership_date, umc_status, archive_category, archive_reason, membership_removed_date, deceased_date, archived_at, notes, breeze_id, breeze_extra'
 
 const display = (p) => `${p.last_name ? p.last_name + ', ' : ''}${p.preferred_name || p.first_name}`
 const today = () => new Date().toISOString().slice(0, 10)
@@ -108,6 +110,9 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
       if (quick === 'noaddress' && (p.street || p.person_type === 'child' || p.person_type === 'organization')) return false
       if (quick === 'noemail' && (p.email || p.person_type === 'organization')) return false
       if (quick === 'directory' && (p.is_directory_opt_out || !p.is_active)) return false
+      if (quick === 'moved' && !['moved', 'moved_no_forwarding'].includes(p.address_status)) return false
+      if (quick === 'badaddr' && !['undeliverable', 'vacant', 'moved_no_forwarding'].includes(p.address_status)) return false
+      if (quick === 'rolls' && (p.is_active || !p.umc_status || p.person_type === 'organization' || p.membership_removed_date)) return false
       if (needle) {
         const hay = `${p.first_name} ${p.preferred_name || ''} ${p.last_name} ${p.email || ''} ${famById[p.family_id]?.family_name || ''}`.toLowerCase()
         if (!hay.includes(needle)) return false
@@ -142,11 +147,17 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
             <option value="noaddress">No address</option>
             <option value="noemail">No email</option>
             <option value="directory">In the directory</option>
+            <option value="moved">Moved (address check)</option>
+            <option value="badaddr">Bad address (address check)</option>
+            <option value="rolls">Archived but still has a UMC status</option>
           </select>
         </div>
       </div>
 
-      <div style={{ fontSize: 13, color: 'var(--gray-600)', margin: '0 2px 8px' }}>{shown.length} {shown.length === 1 ? 'person' : 'people'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 2px 8px' }}>
+        <div style={{ fontSize: 13, color: 'var(--gray-600)', flex: 1 }}>{shown.length} {shown.length === 1 ? 'person' : 'people'}</div>
+        {shown.length > 0 && <button className="btn btn-sm btn-secondary" onClick={() => downloadList(shown, famById)}>⬇ Download this list</button>}
+      </div>
 
       <div style={{ display: 'grid', gap: 6 }}>
         {shown.slice(0, limit).map(p => (
@@ -170,6 +181,28 @@ function PeopleList({ people, families, tags, links, onOpen, onAdd }) {
       {shown.length > limit && <button className="btn btn-secondary" style={{ marginTop: 10, width: '100%' }} onClick={() => setLimit(l => l + 200)}>Show more ({shown.length - limit} left)</button>}
     </div>
   )
+}
+
+async function downloadList(rows, famById) {
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('People')
+  ws.columns = [
+    { header: 'Last name', width: 18 }, { header: 'First name', width: 16 }, { header: 'Kind', width: 12 }, { header: 'Active', width: 8 },
+    { header: 'UMC status', width: 16 }, { header: 'Membership status', width: 30 }, { header: 'Removed from membership', width: 14 },
+    { header: 'Street', width: 30 }, { header: 'City', width: 16 }, { header: 'State', width: 7 }, { header: 'ZIP', width: 10 },
+    { header: 'Address check', width: 28 }, { header: 'Previous address', width: 40 }, { header: 'Moved', width: 10 },
+    { header: 'Email', width: 28 }, { header: 'Phone', width: 15 }, { header: 'Family', width: 16 },
+  ]
+  rows.forEach(p => ws.addRow([p.last_name, p.preferred_name || p.first_name, TYPE_LABELS[p.person_type], p.is_active ? 'Yes' : 'No',
+    p.umc_status || '', p.is_active ? '' : (LEFT_LABELS[p.archive_category] || 'Reason not recorded'), p.membership_removed_date || '',
+    p.street || '', p.city || '', p.state || '', p.zip || '', ADDR_LABELS[p.address_status] || '', p.previous_address || '', p.moved_on ? p.moved_on.slice(0, 7) : '',
+    p.email || '', p.phone || p.home_phone || '', famById[p.family_id]?.family_name || '']))
+  ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3D0026' } }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+  const buf = await wb.xlsx.writeBuffer()
+  const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+  const a = document.createElement('a'); a.href = url; a.download = `UMCD People ${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
 }
 
 /* ---------------------------------------------------------------- editor */
@@ -341,6 +374,12 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
             </div>
           </Field>
         </div>
+        {f.address_status && f.address_status !== 'ok' && (
+          <div style={{ fontSize: 13, marginTop: 10, padding: '8px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--warning-light)' }}>
+            <strong>{ADDR_LABELS[f.address_status]}</strong>{f.moved_on ? ` · ${f.moved_on.slice(0, 7)}` : ''}{f.address_checked_at ? ` · checked ${f.address_checked_at}` : ''}
+            {f.previous_address && <div>Previous address: {f.previous_address}</div>}
+          </div>
+        )}
         {fam?.address && <div style={{ fontSize: 13, color: 'var(--gray-600)', marginTop: 8 }}>Family address: {fam.address}</div>}
       </div>
 
