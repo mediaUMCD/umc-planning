@@ -507,8 +507,10 @@ function Reports({ funds }) {
         {gifts && gifts.length > 0 && <button className="btn btn-secondary" onClick={download}>Download Excel</button>}
       </div>
       {err && <div className="card" style={{ color: 'var(--danger)' }}>{err}</div>}
+      <SendToBoard funds={funds} />
       {gifts && (
         <>
+          <MonthlyByFund gifts={gifts} funds={funds} from={from} to={to} />
           <div className="card" style={{ marginBottom: 14, overflowX: 'auto' }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>By fund · {money(total)} from {byGiver.length} givers</div>
             {byFund.length === 0 ? <div style={{ color: 'var(--gray-600)' }}>No gifts in these dates.</div> : (
@@ -528,6 +530,153 @@ function Reports({ funds }) {
             </div>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------- month-by-fund (printable) */
+
+const monthKey = (d) => d.slice(0, 7)
+const monthLabel = (k, long) => new Date(k + '-15T12:00:00').toLocaleDateString('en-US', long ? { month: 'long', year: 'numeric' } : { month: 'short' })
+function monthsBetween(from, to) {
+  const out = []; let [y, m] = from.slice(0, 7).split('-').map(Number); const [ty, tm] = to.slice(0, 7).split('-').map(Number)
+  while (y < ty || (y === ty && m <= tm)) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++ } }
+  return out
+}
+
+function MonthlyByFund({ gifts, funds, from, to }) {
+  const months = monthsBetween(from, to)
+  const fundName = (id) => funds.find(f => f.id === id)?.name || '—'
+  const grid = {}
+  for (const g of gifts) { const f = fundName(g.fund_id); grid[f] = grid[f] || {}; const k = monthKey(g.gift_date); grid[f][k] = (grid[f][k] || 0) + Number(g.amount) }
+  const order = [...funds.map(f => f.name), ...Object.keys(grid)].filter((v, i, a) => a.indexOf(v) === i && grid[v])
+  const colTotal = (k) => order.reduce((s, f) => s + (grid[f][k] || 0), 0)
+  const rowTotal = (f) => months.reduce((s, k) => s + (grid[f][k] || 0), 0)
+  const grand = order.reduce((s, f) => s + rowTotal(f), 0)
+  const yearsDiffer = from.slice(0, 4) !== to.slice(0, 4)
+  const head = (k) => yearsDiffer ? `${monthLabel(k)} ${k.slice(2, 4)}` : monthLabel(k)
+
+  function print() {
+    const esc = (s) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+    const td = (v, b) => `<td style="text-align:right;${b ? 'font-weight:700;' : ''}">${v ? money(v) : '—'}</td>`
+    const html = `<!doctype html><html><head><title>Giving by fund</title><style>
+      body{font-family:Arial,sans-serif;color:#222;margin:24px} h1{font-size:18px;color:#3D0026;margin:0 0 2px} .sub{font-size:12px;color:#666;margin-bottom:14px}
+      table{border-collapse:collapse;width:100%;font-size:11px} th,td{border:1px solid #ccc;padding:5px 6px} th{background:#f4ecf0;color:#3D0026;text-align:right}
+      th:first-child,td:first-child{text-align:left} tr.t td{font-weight:700;background:#faf6f8} @page{size:landscape;margin:12mm}</style></head><body>
+      <h1>United Methodist Church of Danielson — Giving by Fund</h1>
+      <div class="sub">${esc(monthLabel(months[0], true))} – ${esc(monthLabel(months[months.length - 1], true))} · printed ${new Date().toLocaleDateString()}</div>
+      <table><thead><tr><th>Fund</th>${months.map(k => `<th>${esc(head(k))}</th>`).join('')}<th>Total</th></tr></thead><tbody>
+      ${order.map(f => `<tr><td>${esc(f)}</td>${months.map(k => td(grid[f][k])).join('')}${td(rowTotal(f), true)}</tr>`).join('')}
+      <tr class="t"><td>Total</td>${months.map(k => td(colTotal(k), true)).join('')}${td(grand, true)}</tr></tbody></table>
+      <script>window.onload=()=>{window.print()}</script></body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return alert('Your browser blocked the print window. Allow pop-ups for this site and try again.')
+    w.document.write(html); w.document.close()
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 14, overflowX: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={{ fontWeight: 700 }}>Month by fund</div>
+        <button className="btn btn-sm btn-secondary" onClick={print} disabled={!order.length}>Print</button>
+      </div>
+      {!order.length ? <div style={{ color: 'var(--gray-600)' }}>No gifts in these dates.</div> : (
+        <table className="data-table">
+          <thead><tr><th>Fund</th>{months.map(k => <th key={k} style={{ textAlign: 'right' }}>{head(k)}</th>)}<th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+          <tbody>
+            {order.map(f => (
+              <tr key={f}><td>{f}</td>{months.map(k => <td key={k} style={{ textAlign: 'right' }}>{grid[f][k] ? money(grid[f][k]) : '—'}</td>)}<td style={{ textAlign: 'right', fontWeight: 700 }}>{money(rowTotal(f))}</td></tr>
+            ))}
+            <tr><td style={{ fontWeight: 700 }}>Total</td>{months.map(k => <td key={k} style={{ textAlign: 'right', fontWeight: 700 }}>{money(colTotal(k))}</td>)}<td style={{ textAlign: 'right', fontWeight: 700 }}>{money(grand)}</td></tr>
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------- send to One Board report */
+
+// Same shape One Board's "Incoming Giving" field uses: { givers, funds, methods, source }
+const BOARD_METHOD = { check: 'Check', cash: 'Cash', online: 'Credit/Debit Online', card: 'Credit/Debit Online', ach: 'Direct Deposit', stock: 'Other', other: 'Other' }
+const BOARD_METHOD_ORDER = ['Credit/Debit Online', 'Direct Deposit', 'Cash', 'Check', 'Other']
+
+function lastMonthKey() { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+
+function SendToBoard({ funds }) {
+  const [month, setMonth] = useState(lastMonthKey())
+  const [meetings, setMeetings] = useState([])
+  const [meetingId, setMeetingId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState(null)
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('board_meetings').select('id, meeting_date, custom_title, meeting_type')
+        .gte('meeting_date', today()).order('meeting_date').limit(6)
+      setMeetings(data || []); if (data?.[0]) setMeetingId(data[0].id)
+    })()
+  }, [])
+
+  async function send() {
+    setErr(''); setDone(null); setBusy(true)
+    try {
+      const [y, m] = month.split('-').map(Number)
+      const from = `${month}-01`, to = new Date(y, m, 0).toLocaleDateString('en-CA')
+      const gifts = await fetchGifts(from, to)
+      if (!gifts.length) throw new Error(`There are no gifts entered for ${monthLabel(month, true)} yet.`)
+      const fundName = (id) => funds.find(f => f.id === id)?.name || 'Other'
+      const tally = (keyOf) => {
+        const t = {}
+        for (const g of gifts) { const k = keyOf(g); t[k] = t[k] || { name: k, count: 0, amount: 0 }; t[k].count++; t[k].amount += Number(g.amount) }
+        return Object.values(t).map(r => ({ ...r, amount: Math.round(r.amount * 100) / 100 }))
+      }
+      const fundRows = tally(g => fundName(g.fund_id)).sort((a, b) => funds.findIndex(f => f.name === a.name) - funds.findIndex(f => f.name === b.name))
+      const methodRows = tally(g => BOARD_METHOD[g.method] || 'Other').sort((a, b) => BOARD_METHOD_ORDER.indexOf(a.name) - BOARD_METHOD_ORDER.indexOf(b.name))
+      const named = new Set(gifts.filter(g => g.person_id).map(g => g.person_id)).size
+      const giving = { givers: String(named), funds: fundRows, methods: methodRows, source: 'Planning Hub' }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle()
+      const label = monthLabel(month, true)
+      const { data, error } = await supabase.from('board_reports').insert({
+        report_type: 'incoming_finance', meeting_id: meetingId || null, submitted_by: user.id,
+        submitter_name: prof?.full_name || user.email, period: label, subject: `${label.split(' ')[0]} giving`,
+        content_json: { giving }, status: 'draft',
+      }).select('id').single()
+      if (error) throw error
+      setDone({ id: data.id, label })
+    } catch (e) { setErr(e.message) }
+    setBusy(false)
+  }
+
+  const mtgLabel = (x) => `${nice(x.meeting_date)}${x.custom_title ? ' — ' + x.custom_title : ''}`
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>Send a month to One Board</div>
+      <div style={{ fontSize: 13, color: 'var(--gray-600)', marginBottom: 10 }}>
+        Makes the <strong>Incoming Finance</strong> report for the board meeting, already filled in: total givers, each fund and each method.
+        No names or amounts per person go to the board. It’s saved as a draft so you can add notes before you submit it.
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ width: 180 }}><label className="form-label">Month</label>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} /></div>
+        <div style={{ minWidth: 240 }}><label className="form-label">Board meeting</label>
+          <select value={meetingId} onChange={e => setMeetingId(e.target.value)}>
+            <option value="">No meeting yet</option>
+            {meetings.map(x => <option key={x.id} value={x.id}>{mtgLabel(x)}</option>)}
+          </select></div>
+        <button className="btn btn-primary" disabled={busy} onClick={send}>{busy ? 'Making the report…' : 'Make the board report'}</button>
+      </div>
+      {err && <div style={{ color: 'var(--danger)', marginTop: 8 }}>{err}</div>}
+      {done && (
+        <div style={{ marginTop: 10, fontSize: 14 }}>
+          ✓ {done.label} report is ready.{' '}
+          <a href={`https://board.umcdanielson.org/reports/${done.id}`} target="_blank" rel="noreferrer">Open it in One Board</a> to add notes and press <strong>Submit</strong>.
+        </div>
       )}
     </div>
   )

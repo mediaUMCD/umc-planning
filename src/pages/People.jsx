@@ -12,6 +12,14 @@ const LEFT_LABELS = {
   inactive: 'Deactivated', moved: 'Moved out of area', withdrawn: 'Withdrew', charge_conference: 'Removed by Charge Conference',
   other: 'Other', unknown: 'Reason not recorded',
 }
+// Choices are editable (People → Dropdown choices); these are filled from the database on load.
+const DECEASED_KEYS = new Set(['death'])
+function applyReasons(rows) {
+  if (!rows?.length) return
+  for (const k of Object.keys(LEFT_LABELS)) delete LEFT_LABELS[k]
+  DECEASED_KEYS.clear()
+  for (const x of rows) { LEFT_LABELS[x.key] = x.label; if (x.is_deceased) DECEASED_KEYS.add(x.key) }
+}
 const ADDR_LABELS = { ok: 'Address checked OK', moved: 'Moved (new address found)', moved_no_forwarding: 'Moved, no forwarding address', undeliverable: 'Address not deliverable', vacant: 'Address vacant / box closed' }
 const COLS = 'address_status, previous_address, moved_on, address_checked_at, id, first_name, last_name, preferred_name, middle_name, maiden_name, suffix, email, phone, home_phone, street, city, state, zip, birthdate, gender, marital_status, person_type, family_id, family_role, is_active, is_directory_opt_out, membership_date, umc_status, archive_category, archive_reason, membership_removed_date, deceased_date, archived_at, notes, breeze_id, breeze_extra'
 
@@ -35,11 +43,13 @@ export default function People() {
       if (error) return setError(error.message)
       all.push(...data); if (data.length < 1000) break
     }
-    const [f, t, l] = await Promise.all([
+    const [f, t, l, rs] = await Promise.all([
       supabase.from('families').select('id, family_name, address, primary_phone').order('family_name'),
       supabase.from('tags').select('id, name, color').order('name'),
       supabase.from('person_tags').select('person_id, tag_id'),
+      supabase.from('people_archive_reasons').select('key, label, is_deceased, sort_order').order('sort_order').order('label'),
     ])
+    if (!rs.error) applyReasons(rs.data)
     const err = f.error || t.error || l.error
     if (err) return setError(err.message)
     setPeople(all); setFamilies(f.data); setTags(t.data); setLinks(l.data)
@@ -65,6 +75,7 @@ export default function People() {
           <div style={{ display: 'flex', gap: 6 }}>
             <button className={`btn btn-sm ${tab === 'people' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('people')}>People</button>
             <button className={`btn btn-sm ${tab === 'left' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('left')}>Why people left</button>
+            <button className={`btn btn-sm ${tab === 'choices' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('choices')}>Dropdown choices</button>
             <button className={`btn btn-sm ${tab === 'dupes' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('dupes')}>Possible duplicates</button>
           </div>
         )}
@@ -79,6 +90,8 @@ export default function People() {
             <PeopleList people={people} families={families} tags={tags} links={links} onOpen={setEditing}
               onBulkSaved={(rows) => setPeople(ps => { const m = Object.fromEntries(rows.map(r => [r.id, r])); return ps.map(p => m[p.id] || p) })}
               onAdd={() => setEditing({ isNew: true, first_name: '', last_name: '', person_type: 'visitor', is_active: true, is_directory_opt_out: true })} />
+          ) : tab === 'choices' ? (
+            <ReasonChoices people={people} onChanged={load} />
           ) : tab === 'dupes' ? (
             <Duplicates people={people} families={families} links={links} onChanged={load} onOpen={setEditing} />
           ) : <WhyLeft people={people} />}
@@ -348,10 +361,10 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
   async function archive() {
     if (!arch.category) return setErr('Choose why they are no longer active.')
     await save({
-      is_active: false, is_directory_opt_out: true, archived_at: new Date().toISOString(),
+      is_active: false, is_directory_opt_out: true, archived_at: arch.archived ? arch.archived + 'T12:00:00' : new Date().toISOString(),
       archive_category: arch.category, archive_reason: arch.note || null,
       membership_removed_date: arch.removed || null,
-      deceased_date: arch.category === 'death' ? (arch.deceased || null) : f.deceased_date,
+      deceased_date: DECEASED_KEYS.has(arch.category) ? (arch.deceased || null) : f.deceased_date,
     })
     setArch(null)
   }
@@ -479,7 +492,7 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
           {f.is_active ? (!arch ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, fontSize: 14, color: 'var(--gray-600)' }}>No longer coming? Archive them. Nothing is deleted, and you can restore them any time.</div>
-              <button className="btn btn-secondary" onClick={() => setArch({ category: '', removed: today(), deceased: '', note: '' })}>Archive…</button>
+              <button className="btn btn-secondary" onClick={() => setArch({ category: '', removed: today(), archived: today(), deceased: '', note: '' })}>Archive…</button>
             </div>
           ) : (
             <div>
@@ -492,7 +505,8 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
                   </select>
                 </Field>
                 <Field label="Date removed from membership"><input type="date" value={arch.removed} onChange={e => setArch({ ...arch, removed: e.target.value })} /></Field>
-                {arch.category === 'death' && <Field label="Date deceased"><input type="date" value={arch.deceased} onChange={e => setArch({ ...arch, deceased: e.target.value })} /></Field>}
+                <Field label="Date archived"><input type="date" value={arch.archived} onChange={e => setArch({ ...arch, archived: e.target.value })} /></Field>
+                {DECEASED_KEYS.has(arch.category) && <Field label="Date deceased"><input type="date" value={arch.deceased} onChange={e => setArch({ ...arch, deceased: e.target.value })} /></Field>}
                 <Field label="Note (optional)" wide><input value={arch.note} onChange={e => setArch({ ...arch, note: e.target.value })} placeholder="e.g. Joined Putnam UMC" /></Field>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -510,7 +524,8 @@ function PersonEditor({ person, families, setFamilies, tags, setTags, links, set
                   </select>
                 </Field>
                 <Field label="Date removed from membership"><input type="date" value={f.membership_removed_date || ''} onChange={set('membership_removed_date')} /></Field>
-                {f.archive_category === 'death' && <Field label="Date deceased"><input type="date" value={f.deceased_date || ''} onChange={set('deceased_date')} /></Field>}
+                <Field label="Date archived"><input type="date" value={(f.archived_at || '').slice(0, 10)} onChange={e => setF({ ...f, archived_at: e.target.value ? e.target.value + 'T12:00:00' : null })} /></Field>
+                {DECEASED_KEYS.has(f.archive_category) && <Field label="Date deceased"><input type="date" value={f.deceased_date || ''} onChange={set('deceased_date')} /></Field>}
                 <Field label="Note" wide><input value={f.archive_reason || ''} onChange={set('archive_reason')} /></Field>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -689,6 +704,109 @@ function Duplicates({ people, families, links, onChanged, onOpen }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------- dropdown choices */
+
+function ReasonChoices({ people, onChanged }) {
+  const [rows, setRows] = useState(null)
+  const [admin, setAdmin] = useState(false)
+  const [label, setLabel] = useState('')
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+
+  async function load() {
+    const [r, a] = await Promise.all([
+      supabase.from('people_archive_reasons').select('*').order('sort_order').order('label'),
+      supabase.rpc('is_admin'),
+    ])
+    if (r.error) return setErr(r.error.message)
+    setRows(r.data); setAdmin(!!a.data)
+  }
+  useEffect(() => { load() }, [])
+  async function done(error, note) {
+    if (error) return setErr(error.message)
+    setErr(''); setMsg(note || ''); await load(); onChanged()
+  }
+
+  async function add() {
+    if (!label.trim()) return
+    const key = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) + '_' + Math.random().toString(36).slice(2, 6)
+    const max = Math.max(0, ...rows.filter(r => r.key !== 'unknown').map(r => r.sort_order))
+    const { error } = await supabase.from('people_archive_reasons').insert({ key, label: label.trim(), sort_order: max + 10 })
+    setLabel(''); done(error, 'Added.')
+  }
+  async function rename(r, v) {
+    if (!v.trim() || v.trim() === r.label) return
+    const { error } = await supabase.from('people_archive_reasons').update({ label: v.trim() }).eq('key', r.key)
+    done(error, 'Saved. Everyone with this status now shows the new name.')
+  }
+  async function toggleDeceased(r) {
+    const { error } = await supabase.from('people_archive_reasons').update({ is_deceased: !r.is_deceased }).eq('key', r.key)
+    done(error)
+  }
+  async function move(list, i, dir) {
+    const j = i + dir
+    if (j < 0 || j >= list.length) return
+    const [a, b] = [list[i], list[j]]
+    const r1 = await supabase.from('people_archive_reasons').update({ sort_order: b.sort_order }).eq('key', a.key)
+    const r2 = await supabase.from('people_archive_reasons').update({ sort_order: a.sort_order === b.sort_order ? a.sort_order + dir : a.sort_order }).eq('key', b.key)
+    done(r1.error || r2.error)
+  }
+  async function remove(r) {
+    const used = people.filter(p => p.archive_category === r.key).length
+    if (used) return setErr(`${used} ${used === 1 ? 'person has' : 'people have'} "${r.label}". Rename it instead, or change those people first.`)
+    const { error } = await supabase.from('people_archive_reasons').delete().eq('key', r.key)
+    done(error, 'Removed.')
+  }
+
+  if (!rows) return err ? <div className="card" style={{ color: 'var(--danger)' }}>{err}</div> : <div className="spinner" />
+  const list = rows.filter(r => r.key !== 'unknown')
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 14, fontSize: 14, color: 'var(--gray-600)', lineHeight: 1.5 }}>
+        These are the choices in <strong>Membership status</strong> when you archive someone. Renaming one updates everyone who has it.
+        Tick “Asks for date deceased” to show the deceased-date box for that choice.
+        {!admin && <div style={{ marginTop: 6, color: 'var(--danger)' }}>Only admins can change these.</div>}
+      </div>
+      {admin && (
+        <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220 }}><label className="form-label">New choice</label>
+            <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Moved to a nursing home" onKeyDown={e => e.key === 'Enter' && add()} /></div>
+          <button className="btn btn-primary" onClick={add}>Add choice</button>
+        </div>
+      )}
+      {err && <div className="card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{err}</div>}
+      {msg && !err && <div style={{ color: 'var(--success, #2e7d32)', marginBottom: 10, fontSize: 14 }}>{msg}</div>}
+      <div className="card" style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead><tr><th>Choice</th><th style={{ textAlign: 'right' }}>People</th><th>Date deceased</th>{admin && <th />}</tr></thead>
+          <tbody>
+            {list.map((r, i) => (
+              <tr key={r.key}>
+                <td>{admin ? <input defaultValue={r.label} onBlur={e => rename(r, e.target.value)} /> : r.label}</td>
+                <td style={{ textAlign: 'right' }}>{people.filter(p => p.archive_category === r.key).length}</td>
+                <td><label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="checkbox" style={{ width: 'auto', flex: 'none' }} checked={r.is_deceased} disabled={!admin} onChange={() => toggleDeceased(r)} /> Asks for it
+                </label></td>
+                {admin && (
+                  <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
+                    <button className="btn btn-sm btn-secondary" disabled={i === 0} onClick={() => move(list, i, -1)}>↑</button>{' '}
+                    <button className="btn btn-sm btn-secondary" disabled={i === list.length - 1} onClick={() => move(list, i, 1)}>↓</button>{' '}
+                    <button className="btn btn-sm btn-secondary" onClick={() => remove(r)}>Remove</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ fontSize: 13, color: 'var(--gray-600)', marginTop: 10 }}>
+          “Reason not recorded” is built in for people Breeze archived without a reason ({people.filter(p => !p.is_active && (!p.archive_category || p.archive_category === 'unknown')).length} right now).
+        </div>
+      </div>
     </div>
   )
 }
