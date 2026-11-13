@@ -31,7 +31,7 @@ const OTHER_APPS = [
   { label: 'Public Set List', href: '/setlist',                       icon: '🎵' },
 ]
 
-export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising }) {
+export default function Sidebar({ page, navigate, session, isFinanceOnly, canFundraising, canAttendance }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // Close the menu automatically after navigating — this app uses internal
@@ -44,7 +44,7 @@ export default function Sidebar({ page, navigate, session, isFinanceOnly, canFun
   }
 
   const items = isFinanceOnly
-    ? FINANCE_ONLY_NAV_ITEMS
+    ? (canAttendance ? [...FINANCE_ONLY_NAV_ITEMS, ...NAV_ITEMS.filter(i => i.id === 'attendance' || i.id === 'people')] : FINANCE_ONLY_NAV_ITEMS)
     : canFundraising ? [...NAV_ITEMS, FUNDRAISING_ITEM] : NAV_ITEMS
 
   return (

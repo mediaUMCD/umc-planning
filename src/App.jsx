@@ -64,11 +64,14 @@ export default function App() {
   const isAdmin = roles.includes('admin')
   const isFinanceOnly = roles.includes('finance') && !isAdmin
   const canFundraising = isAdmin || roles.includes('fundraising')
+  const canAttendance = isAdmin || roles.includes('attendance')
 
-  // Finance-only logins are scoped to just Check Requests, everywhere else.
+  // Finance-only logins are scoped to Check Requests (plus Attendance and
+  // People when they also take attendance), everywhere else.
+  const financeOnlyPages = canAttendance ? ['check-requests', 'attendance', 'people'] : ['check-requests']
   useEffect(() => {
-    if (isFinanceOnly && page !== 'check-requests') setPage('check-requests')
-  }, [isFinanceOnly, page])
+    if (isFinanceOnly && !financeOnlyPages.includes(page)) setPage('check-requests')
+  }, [isFinanceOnly, page, canAttendance])
 
   if (authLoading || (session && !rolesLoaded)) {
     return (
@@ -99,7 +102,7 @@ export default function App() {
   }
 
   const renderPage = () => {
-    if (isFinanceOnly) return <CheckRequests />
+    if (isFinanceOnly) return page === 'attendance' && canAttendance ? <Attendance /> : page === 'people' && canAttendance ? <People /> : <CheckRequests />
 
     switch (page) {
       case 'dashboard': return <Dashboard navigate={setPage} onViewService={navigateToService} onViewCE={navigateToCE} />
@@ -134,7 +137,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} navigate={(p) => { if (p !== page && !confirmDiscardChanges()) return; setPage(p) }} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} />
+      <Sidebar page={page} navigate={(p) => { if (p !== page && !confirmDiscardChanges()) return; setPage(p) }} session={session} isFinanceOnly={isFinanceOnly} canFundraising={canFundraising} canAttendance={canAttendance} />
       <div className="main-content">
         {renderPage()}
       </div>
