@@ -65,6 +65,7 @@ export default function People() {
           <div style={{ display: 'flex', gap: 6 }}>
             <button className={`btn btn-sm ${tab === 'people' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('people')}>People</button>
             <button className={`btn btn-sm ${tab === 'left' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('left')}>Why people left</button>
+            <button className={`btn btn-sm ${tab === 'dupes' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('dupes')}>Possible duplicates</button>
           </div>
         )}
       </div>
@@ -78,6 +79,8 @@ export default function People() {
             <PeopleList people={people} families={families} tags={tags} links={links} onOpen={setEditing}
               onBulkSaved={(rows) => setPeople(ps => { const m = Object.fromEntries(rows.map(r => [r.id, r])); return ps.map(p => m[p.id] || p) })}
               onAdd={() => setEditing({ isNew: true, first_name: '', last_name: '', person_type: 'visitor', is_active: true, is_directory_opt_out: true })} />
+          ) : tab === 'dupes' ? (
+            <Duplicates people={people} families={families} links={links} onChanged={load} onOpen={setEditing} />
           ) : <WhyLeft people={people} />}
       </div>
     </div>
@@ -569,6 +572,123 @@ function WhyLeft({ people }) {
           "Reason not recorded" means Breeze archived them without a reason. Open a person on the People tab to fill it in.
         </div>
       )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------ duplicates */
+
+function Duplicates({ people, families, links, onChanged, onOpen }) {
+  const [pairs, setPairs] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const [confirm, setConfirm] = useState(null) // { key, keepId, dropId }
+  const [done, setDone] = useState(0)
+  const byId = useMemo(() => Object.fromEntries(people.map(p => [p.id, p])), [people])
+  const famName = (id) => families.find(f => f.id === id)?.family_name
+
+  async function find() {
+    setErr('')
+    const { data, error } = await supabase.rpc('find_duplicate_people')
+    if (error) return setErr(error.message)
+    setPairs(data)
+  }
+  useEffect(() => { find() }, [people])
+
+  async function merge(keepId, dropId) {
+    setBusy(keepId + dropId); setErr('')
+    const { error } = await supabase.rpc('merge_duplicate_people', { p_primary_id: keepId, p_duplicate_id: dropId })
+    setBusy(''); setConfirm(null)
+    if (error) return setErr(error.message)
+    setDone(n => n + 1)
+    await onChanged()
+  }
+  async function notSame(a, b) {
+    setBusy(a + b); setErr('')
+    const [x, y] = a < b ? [a, b] : [b, a]
+    const { error } = await supabase.from('people_not_duplicates').insert({ a: x, b: y })
+    setBusy('')
+    if (error) return setErr(error.message)
+    setPairs(ps => ps.filter(p => !(p.a_id === a && p.b_id === b)))
+  }
+
+  if (!pairs) return err ? <div className="card" style={{ color: 'var(--danger)' }}>{err}</div> : <div className="spinner" />
+
+  const rows = (p) => [
+    ['Status', p.is_active ? 'Active' : `Archived${p.archive_category ? ' — ' + (LEFT_LABELS[p.archive_category] || p.archive_category) : ''}`],
+    ['Type', TYPE_LABELS[p.person_type] || p.person_type],
+    ['Membership', [p.umc_status, p.membership_date && `since ${p.membership_date}`].filter(Boolean).join(' ')],
+    ['Birthday', p.birthdate],
+    ['Email', p.email],
+    ['Phone', p.phone || p.home_phone],
+    ['Address', [p.street, p.city, p.state, p.zip].filter(Boolean).join(', ')],
+    ['Family', famName(p.family_id)],
+    ['Tags', links.filter(l => l.person_id === p.id).length || ''],
+    ['Breeze ID', p.breeze_id],
+  ]
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 14, fontSize: 14, lineHeight: 1.5 }}>
+        <strong>{pairs.length} possible {pairs.length === 1 ? 'duplicate' : 'duplicates'}</strong>
+        {done > 0 && <span style={{ color: 'var(--success, #2e7d32)' }}> · {done} merged this visit</span>}
+        <div style={{ color: 'var(--gray-600)', fontSize: 13, marginTop: 4 }}>
+          Pick the record to keep. The other one is folded into it: its tags, attendance, classes and follow-up history move over,
+          and any blank details on the kept record (address, email, birthday, membership) are filled in from it. Nothing the kept record
+          already has is overwritten. Merging can't be undone, so if two people just share a name, choose "Not the same person".
+        </div>
+      </div>
+      {err && <div className="card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{err}</div>}
+      {pairs.length === 0 && <div className="card" style={{ color: 'var(--gray-600)' }}>No possible duplicates left. 🎉</div>}
+      {pairs.map(pr => {
+        const a = byId[pr.a_id], b = byId[pr.b_id]
+        if (!a || !b) return null
+        const key = pr.a_id + pr.b_id
+        const ra = rows(a), rb = rows(b)
+        return (
+          <div key={key} className="card" style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--wine, #7A0047)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>{pr.reason}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+              {[[a, ra, b], [b, rb, a]].map(([p, r, other], side) => (
+                <div key={p.id} style={{ border: '1px solid var(--gray-200, #ddd)', borderRadius: 8, padding: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>
+                    <a href="#" onClick={e => { e.preventDefault(); onOpen(p) }} style={{ color: 'inherit' }}>
+                      {[p.first_name, p.middle_name, p.last_name, p.suffix].filter(Boolean).join(' ')}
+                    </a>
+                    {p.preferred_name && <span style={{ fontWeight: 400, color: 'var(--gray-600)' }}> ({p.preferred_name})</span>}
+                  </div>
+                  <table style={{ fontSize: 13, width: '100%' }}><tbody>
+                    {r.map(([label, v], i) => {
+                      const ov = (side === 0 ? rb : ra)[i][1]
+                      const differs = v && ov && String(v) !== String(ov)
+                      return (
+                        <tr key={label}>
+                          <td style={{ color: 'var(--gray-600)', paddingRight: 8, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{label}</td>
+                          <td style={{ fontWeight: differs ? 600 : 400, color: v ? 'inherit' : 'var(--gray-400, #aaa)' }}>{v || '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody></table>
+                  {confirm?.key === key && confirm.keepId === p.id ? (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => merge(p.id, other.id)}>
+                        {busy === p.id + other.id ? 'Merging…' : 'Yes, merge into this one'}
+                      </button>
+                      <button className="btn btn-sm btn-secondary" onClick={() => setConfirm(null)}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button className="btn btn-sm btn-secondary" style={{ marginTop: 10 }} disabled={!!busy}
+                      onClick={() => setConfirm({ key, keepId: p.id })}>Keep this one</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, textAlign: 'right' }}>
+              <button className="btn btn-sm btn-secondary" disabled={!!busy} onClick={() => notSame(pr.a_id, pr.b_id)}>Not the same person</button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
