@@ -29,7 +29,7 @@ export default function Giving({ canReview }) {
   useEffect(() => { loadFunds() }, [])
 
   const tabs = canReview
-    ? [['count', 'Sunday count'], ['counts', 'All counts'], ['reports', 'Reports'], ['funds', 'Funds']]
+    ? [['count', 'Sunday count'], ['counts', 'All counts'], ['reports', 'Reports'], ['statements', 'Statements'], ['funds', 'Funds']]
     : [['count', 'Sunday count']]
 
   return (
@@ -56,6 +56,7 @@ export default function Giving({ canReview }) {
           : tab === 'count' ? <OpenCounts funds={funds} canReview={canReview} onOpen={setOpenBatch} />
           : tab === 'counts' ? <AllCounts onOpen={setOpenBatch} />
           : tab === 'reports' ? <Reports funds={funds} />
+          : tab === 'statements' ? <Statements />
           : <Funds funds={funds} onChanged={loadFunds} />}
       </div>
     </div>
@@ -676,6 +677,180 @@ function SendToBoard({ funds }) {
         <div style={{ marginTop: 10, fontSize: 14 }}>
           ✓ {done.label} report is ready.{' '}
           <a href={`https://board.umcdanielson.org/reports/${done.id}`} target="_blank" rel="noreferrer">Open it in One Board</a> to add notes and press <strong>Submit</strong>.
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------- year-end statements */
+
+const CHURCH = { name: 'United Methodist Church of Danielson', street: '9 Spring Street', cityLine: 'Danielson, CT 06239', phone: '860-779-2018' }
+const IRS_LINE = 'No goods or services were provided in exchange for these contributions other than intangible religious benefits.'
+
+function statementPage(h, year) {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const gifts = h.gifts || []
+  const byFund = {}
+  for (const g of gifts) { byFund[g.fund] = byFund[g.fund] || { amount: 0, deductible: g.deductible }; byFund[g.fund].amount += Number(g.amount) }
+  const nonDed = Object.values(byFund).some(v => !v.deductible)
+  const showGiver = new Set(gifts.map(g => g.giver)).size > 1
+  const short = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const addr = h.street ? `${esc(h.street)}<br>${esc([h.city, h.state].filter(Boolean).join(', '))} ${esc(h.zip || '')}` : '<span class="noaddr">No address on file</span>'
+  return `<section class="page">
+    <div class="ret"><strong>${CHURCH.name}</strong><br>${CHURCH.street}<br>${CHURCH.cityLine}</div>
+    <div class="to">${esc(h.display_name)}<br>${addr}</div>
+    <div class="body">
+      <div class="title">${year} Giving Statement</div>
+      <div class="sub">${esc(h.display_name)} · printed ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+      <p>Thank you for your faithful giving to the United Methodist Church of Danielson in ${year}. Your generosity supports our worship, our ministries and our neighbors.</p>
+      <table class="sum"><thead><tr><th>Fund</th><th class="n">Amount</th></tr></thead><tbody>
+        ${Object.entries(byFund).map(([f, v]) => `<tr><td>${esc(f)}${v.deductible ? '' : ' *'}</td><td class="n">${money(v.amount)}</td></tr>`).join('')}
+        <tr class="t"><td>Total given</td><td class="n">${money(h.total)}</td></tr>
+        ${nonDed ? `<tr class="t"><td>Total tax-deductible contributions</td><td class="n">${money(h.deductible_total)}</td></tr>` : ''}
+      </tbody></table>
+      ${nonDed ? '<div class="small">* Not a tax-deductible contribution.</div>' : ''}
+      <div class="irs">${IRS_LINE} Please keep this statement for your tax records.</div>
+      <div class="h3">Each gift</div>
+      <table class="gifts"><thead><tr><th>Date</th>${showGiver ? '<th>Given by</th>' : ''}<th>Fund</th><th>How</th><th class="n">Amount</th></tr></thead><tbody>
+        ${gifts.map(g => `<tr><td>${short(g.date)}</td>${showGiver ? `<td>${esc(g.giver)}</td>` : ''}<td>${esc(g.fund)}${g.deductible ? '' : ' *'}</td><td>${METHODS[g.method] || esc(g.method)}${g.check ? ' #' + esc(g.check) : ''}</td><td class="n">${money(g.amount)}</td></tr>`).join('')}
+      </tbody></table>
+      <p class="thanks">With gratitude,<br>${CHURCH.name}<br><span class="small">Questions? Call the church office at ${CHURCH.phone}.</span></p>
+    </div>
+  </section>`
+}
+
+function printStatements(list, year) {
+  const html = `<!doctype html><html><head><title>${year} giving statements</title><style>
+    @page { size: letter; margin: 0.5in 0 }
+    * { box-sizing: border-box }
+    body { margin: 0; font-family: Georgia, serif; color: #222 }
+    .page { position: relative; width: 8.5in; min-height: 10in; padding: 0 0.75in; page-break-after: always; font-size: 11pt; line-height: 1.45 }
+    .page:last-child { page-break-after: auto }
+    .ret { font-size: 9.5pt; line-height: 1.35; color: #3D0026 }
+    /* 0.5in page margin + 1.55in = 2.05in from the top edge: lines up with the address window of a standard #10 window envelope (letter folded in thirds) */
+    .to { position: absolute; top: 1.55in; left: 0.9in; width: 3.6in; font-size: 11pt; line-height: 1.35 }
+    .noaddr { color: #b00; font-style: italic }
+    .body { margin-top: 2.15in }
+    .title { font-size: 16pt; font-weight: bold; color: #3D0026 }
+    .sub { font-size: 9pt; color: #666; margin-bottom: 8px }
+    table { border-collapse: collapse; width: 100% }
+    th, td { padding: 4px 6px; border-bottom: 1px solid #e6dde2; text-align: left }
+    th { background: #f4ecf0; color: #3D0026; font-size: 9.5pt }
+    .n { text-align: right }
+    .sum { margin: 8px 0 4px; font-size: 10.5pt }
+    .sum .t td { font-weight: bold }
+    .gifts { font-size: 8.5pt }
+    .gifts td, .gifts th { padding: 2px 6px }
+    .irs { margin: 10px 0; padding: 7px 10px; border-left: 3px solid #7A0047; background: #faf7f8; font-size: 10pt }
+    .h3 { font-weight: bold; color: #3D0026; margin: 12px 0 4px }
+    .small { font-size: 8.5pt; color: #666 }
+    .thanks { margin-top: 14px }
+  </style></head><body>${list.map(h => statementPage(h, year)).join('')}
+  <script>window.onload = () => window.print()</script></body></html>`
+  const w = window.open('', '_blank')
+  if (!w) return alert('Your browser blocked the print window. Allow pop-ups for this site and try again.')
+  w.document.write(html); w.document.close()
+}
+
+function Statements() {
+  const now = new Date()
+  const [year, setYear] = useState(now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear())
+  const [rows, setRows] = useState(null)
+  const [log, setLog] = useState({})
+  const [picked, setPicked] = useState(new Set())
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState('')
+
+  async function load() {
+    setErr(''); setMsg(''); setRows(null)
+    const [h, l] = await Promise.all([
+      supabase.rpc('giving_statement_households', { p_year: year }),
+      supabase.from('giving_statement_log').select('household_key, sent_at').eq('year', year).eq('is_test', false),
+    ])
+    if (h.error) return setErr(h.error.message)
+    const m = {}; for (const r of l.data || []) m[r.household_key] = r.sent_at
+    setRows(h.data); setLog(m); setPicked(new Set(h.data.map(r => r.household_key)))
+  }
+  useEffect(() => { load() }, [year])
+
+  async function email(test) {
+    setErr(''); setMsg('')
+    const keys = rows.filter(r => picked.has(r.household_key)).map(r => r.household_key)
+    if (!keys.length) return setErr('Tick at least one household.')
+    if (!test) {
+      const n = rows.filter(r => picked.has(r.household_key) && r.emails?.length && !log[r.household_key]).length
+      if (!n) return setErr('Every ticked household with an email has already been sent its statement.')
+      if (!window.confirm(`Email ${year} statements to ${n} household${n === 1 ? '' : 's'} now? This can't be undone.`)) return
+    }
+    setBusy(test ? 'test' : 'send')
+    const { data, error } = await supabase.functions.invoke('giving-statements-email', { body: { year, test, keys } })
+    setBusy('')
+    if (error) {
+      let m = error.message
+      try { m = (await error.context.json()).error || m } catch { /* keep message */ }
+      return setErr(m)
+    }
+    if (test) setMsg(`Test sent to ${data.to} (${data.household}'s statement). Check your inbox before sending to everyone.`)
+    else { setMsg(`Emailed ${data.sent} statement${data.sent === 1 ? '' : 's'}.${data.failed?.length ? ` ${data.failed.length} failed: ${data.failed.join('; ')}` : ''}`); load() }
+  }
+
+  const shown = (rows || []).filter(r => !q || r.display_name.toLowerCase().includes(q.toLowerCase()))
+  const sel = (rows || []).filter(r => picked.has(r.household_key))
+  const toggle = (k) => setPicked(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const noAddr = sel.filter(r => !r.street).length
+  const withEmail = sel.filter(r => r.emails?.length).length
+  const sumDed = sel.reduce((s, r) => s + Number(r.deductible_total), 0)
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 14, fontSize: 14, lineHeight: 1.5 }}>
+        One statement per household — people set to “gives with family” share one. <strong>Print</strong> makes one page per household with the
+        address placed for a #10 window envelope (fold in thirds). <strong>Email</strong> also sends each household with an email address its statement.
+        Always send yourself a test first.
+      </div>
+      <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ width: 120 }}><label className="form-label">Year</label>
+          <select value={year} onChange={e => setYear(Number(e.target.value))}>
+            {[0, 1, 2, 3].map(i => now.getFullYear() - i).map(y => <option key={y}>{y}</option>)}
+          </select></div>
+        <div style={{ flex: 1, minWidth: 180 }}><label className="form-label">Find</label>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Name" /></div>
+        <button className="btn btn-secondary" disabled={!sel.length} onClick={() => printStatements(sel, year)}>Print {sel.length} statement{sel.length === 1 ? '' : 's'}</button>
+        <button className="btn btn-secondary" disabled={!!busy || !sel.length} onClick={() => email(true)}>{busy === 'test' ? 'Sending…' : 'Email me a test'}</button>
+        <button className="btn btn-primary" disabled={!!busy || !withEmail} onClick={() => email(false)}>{busy === 'send' ? 'Sending… (about a second each)' : `Email ${withEmail} household${withEmail === 1 ? '' : 's'}`}</button>
+      </div>
+      {err && <div className="card" style={{ color: 'var(--danger)', marginBottom: 12 }}>{err}</div>}
+      {msg && <div className="card" style={{ color: 'var(--success, #2e7d32)', marginBottom: 12 }}>{msg}</div>}
+      {!rows ? (!err && <div className="spinner" />) : rows.length === 0 ? (
+        <div className="card" style={{ color: 'var(--gray-600)' }}>No named gifts in {year} yet.</div>
+      ) : (
+        <div className="card" style={{ overflowX: 'auto' }}>
+          <div style={{ fontSize: 13, color: 'var(--gray-600)', marginBottom: 8 }}>
+            {sel.length} of {rows.length} households ticked · {money(sumDed)} tax-deductible · {withEmail} with email
+            {noAddr > 0 && <span style={{ color: 'var(--danger)' }}> · {noAddr} with no mailing address</span>}
+            {' · '}<a href="#" onClick={e => { e.preventDefault(); setPicked(new Set(rows.map(r => r.household_key))) }}>tick all</a>
+            {' · '}<a href="#" onClick={e => { e.preventDefault(); setPicked(new Set()) }}>untick all</a>
+          </div>
+          <table className="data-table">
+            <thead><tr><th /><th>Household</th><th style={{ textAlign: 'right' }}>Gifts</th><th style={{ textAlign: 'right' }}>Tax-deductible</th><th>Email</th><th>Mail to</th><th /></tr></thead>
+            <tbody>{shown.map(r => (
+              <tr key={r.household_key}>
+                <td><input type="checkbox" style={{ width: 'auto' }} checked={picked.has(r.household_key)} onChange={() => toggle(r.household_key)} /></td>
+                <td style={{ fontWeight: 600 }}>{r.display_name}</td>
+                <td style={{ textAlign: 'right' }}>{(r.gifts || []).length}</td>
+                <td style={{ textAlign: 'right' }}>{money(r.deductible_total)}</td>
+                <td style={{ fontSize: 13 }}>
+                  {r.emails?.length ? r.emails.join(', ') : <span style={{ color: 'var(--gray-600)' }}>— print only</span>}
+                  {log[r.household_key] && <div style={{ color: 'var(--success, #2e7d32)', fontSize: 12 }}>✓ emailed {new Date(log[r.household_key]).toLocaleDateString()}</div>}
+                </td>
+                <td style={{ fontSize: 13 }}>{r.street ? `${r.street}, ${r.city || ''}` : <span style={{ color: 'var(--danger)' }}>No address</span>}</td>
+                <td><button className="btn btn-sm btn-secondary" onClick={() => printStatements([r], year)}>Print</button></td>
+              </tr>
+            ))}</tbody>
+          </table>
         </div>
       )}
     </div>
